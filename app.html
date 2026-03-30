@@ -1,0 +1,2033 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScheduleForge Pro — Multi-Class Timetable Generator</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Raleway:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <!-- <link rel="stylesheet" href="styles.css"> -->
+    <link rel="stylesheet" href="ss.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="topbar-logo">Schedule<span>Forge</span> <em>PRO</em></div>
+      <div class="topbar-divider"></div>
+      <div class="topbar-school" id="topSchoolName">Untitled School</div>
+      <div class="topbar-right">
+        <span class="chip chip-blue" id="chip-classes">0 classes</span>
+        <span class="chip chip-green" id="chip-teachers">0 teachers</span>
+        <span class="chip chip-yellow" id="chip-status">Not generated</span>
+      </div>
+    </div>
+
+    <div class="shell">
+      <!-- SIDEBAR -->
+      <aside class="sidebar">
+        <nav class="sidebar-nav">
+          <div class="nav-section">
+            <div class="nav-section-label">Configuration</div>
+            <button class="nav-item active" onclick="showPanel('school')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <rect x="1" y="4" width="12" height="9" />
+                  <path d="M4 13V9h2.5v4M7.5 9H10v4M1 4l6-3 6 3" />
+                  <rect x="5.5" y="5.5" width="3" height="2.5" /></svg
+              ></span>
+              School Setup
+            </button>
+            <button class="nav-item" onclick="showPanel('import')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <rect x="1" y="5" width="12" height="8" />
+                  <path d="M7 1v7M4.5 5.5L7 8l2.5-2.5" /></svg
+              ></span>
+              Import Excel
+              <span
+                class="nav-badge"
+                id="nb-import"
+                style="color: var(--accent-g); display: none"
+                >✓</span
+              >
+            </button>
+            <button class="nav-item" onclick="showPanel('teachers')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <circle cx="7" cy="4.5" r="2.5" />
+                  <path d="M2 13c0-2.76 2.24-5 5-5s5 2.24 5 5" /></svg
+              ></span>
+              Teachers
+              <span class="nav-badge" id="nb-teachers">0</span>
+            </button>
+            <button class="nav-item" onclick="showPanel('classes')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <rect x="1" y="1" width="12" height="12" />
+                  <path d="M1 4h12M1 7h12M1 10h12M5 1v12" /></svg
+              ></span>
+              Classes & Subjects
+              <span class="nav-badge" id="nb-classes">0</span>
+            </button>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-label">Optimization</div>
+            <button class="nav-item" onclick="showPanel('constraints')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <path d="M3 1h8M3 5h8M3 9h8M3 13h8M7 1v4M10 5v4M5 9v4" /></svg
+              ></span>
+              Constraints
+            </button>
+            <button class="nav-item" onclick="showPanel('generate')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <polygon points="8,1 2,8 7,8 6,13 12,6 7,6" /></svg
+              ></span>
+              Generate
+            </button>
+          </div>
+          <div class="nav-section">
+            <div class="nav-section-label">Output</div>
+            <button class="nav-item" onclick="showPanel('conflicts')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <path d="M7 1L1 12h12L7 1z" />
+                  <path d="M7 5v3.5M7 10.5v.5" /></svg
+              ></span>
+              Conflicts
+              <span
+                class="nav-badge"
+                id="nb-conflicts"
+                style="display: none"
+              ></span>
+            </button>
+            <button class="nav-item" onclick="showPanel('results')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <rect x="1" y="2" width="12" height="11" />
+                  <path d="M1 6h12M5 2v11M9 2v11M1 9h4M9 9h4" /></svg
+              ></span>
+              Timetables
+            </button>
+            <button class="nav-item" onclick="showPanel('teacher-view')">
+              <span class="icon"
+                ><svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                >
+                  <path d="M1 7s2.5-5 6-5 6 5 6 5-2.5 5-6 5-6-5-6-5z" />
+                  <circle cx="7" cy="7" r="2" /></svg
+              ></span>
+              Teacher View
+            </button>
+          </div>
+        </nav>
+        <div class="sidebar-footer">
+          <button
+            class="btn btn-secondary btn-full btn-sm"
+            onclick="loadDemo()"
+          >
+            ⚡ Load Demo Data
+          </button>
+        </div>
+      </aside>
+
+      <!-- MAIN PANELS -->
+      <main class="main">
+        <!-- ═══ SCHOOL SETUP ═══ -->
+        <div class="panel active" id="panel-school">
+          <div class="panel-header">
+            <div class="panel-title">School Setup</div>
+            <div class="panel-sub">
+              Configure global schedule parameters shared across all grade
+              levels
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="g2">
+              <div>
+                <div class="card">
+                  <div class="card-title">School Information</div>
+                  <div class="field">
+                    <label>School Name</label
+                    ><input
+                      type="text"
+                      id="schoolName"
+                      placeholder="e.g. Rizal National High School"
+                      oninput="
+                        document.getElementById('topSchoolName').textContent =
+                          this.value || 'Untitled School'
+                      "
+                    />
+                  </div>
+                  <div class="g2">
+                    <div class="field">
+                      <label>School Year</label
+                      ><input
+                        type="text"
+                        id="schoolYear"
+                        placeholder="2024–2025"
+                      />
+                    </div>
+                    <div class="field">
+                      <label>Semester</label
+                      ><select id="semester">
+                        <option>1st Semester</option>
+                        <option>2nd Semester</option>
+                        <option>Full Year</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card" style="margin-top: 16px">
+                  <div class="card-title">Daily Schedule</div>
+                  <div class="g2">
+                    <div class="field">
+                      <label>School Start Time</label
+                      ><input type="time" id="startTime" value="07:00" />
+                    </div>
+                    <div class="field">
+                      <label>School Days Per Week</label>
+                      <select id="numDays">
+                        <option value="1">1 Day (Mon)</option>
+                        <option value="2">2 Days</option>
+                        <option value="3">3 Days</option>
+                        <option value="4">4 Days</option>
+                        <option value="5" selected>5 Days (Mon–Fri)</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Periods Per Day</label>
+                      <div class="range-row">
+                        <input
+                          type="range"
+                          id="periodsPerDay"
+                          min="4"
+                          max="12"
+                          value="8"
+                          oninput="
+                            this.nextElementSibling.textContent = this.value;
+                            updateSchoolPreview();
+                          "
+                        /><span class="rv">8</span>
+                      </div>
+                    </div>
+                    <div
+                      class="field"
+                      style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        padding: 10px 12px;
+                        background: var(--s3);
+                        border-radius: var(--r-sm);
+                        border: 1px dashed var(--border2);
+                      "
+                    >
+                      <span style="font-size: 18px">⏱</span>
+                      <div>
+                        <div
+                          style="
+                            font-size: 12px;
+                            font-weight: 600;
+                            margin-bottom: 1px;
+                          "
+                        >
+                          Subject Duration
+                        </div>
+                        <div style="font-size: 11px; color: var(--text2)">
+                          Set per subject in Classes tab or Excel import
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>Breaks Per Day (global template)</label>
+                    <div class="range-row">
+                      <input
+                        type="range"
+                        id="numBreaks"
+                        min="0"
+                        max="4"
+                        value="2"
+                        oninput="
+                          this.nextElementSibling.textContent = this.value;
+                          renderBreaks();
+                        "
+                      /><span class="rv">2</span>
+                    </div>
+                  </div>
+                  <div id="break-config"></div>
+                  <div
+                    style="
+                      font-size: 11px;
+                      color: var(--text3);
+                      margin-top: 8px;
+                    "
+                  >
+                    ↑ This is a template — each grade level can override its own
+                    break schedule in Grade Levels below
+                  </div>
+                </div>
+
+                <div class="card" style="margin-top: 16px">
+                  <div class="card-title">Grade Levels</div>
+                  <div id="grade-level-manager"></div>
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    style="margin-top: 12px"
+                    onclick="addGradeModal()"
+                  >
+                    + Add Grade Level
+                  </button>
+                </div>
+              </div>
+
+              <div class="card" style="height: fit-content">
+                <div class="card-title">Schedule Preview</div>
+                <div
+                  id="school-preview"
+                  style="font-size: 13px; line-height: 2.2; color: var(--text2)"
+                ></div>
+                <div
+                  style="
+                    margin-top: 20px;
+                    border-top: 1px solid var(--border);
+                    padding-top: 16px;
+                  "
+                >
+                  <div class="card-title" style="margin-bottom: 10px">
+                    Grade Levels Active
+                  </div>
+                  <div
+                    id="grade-chips"
+                    style="display: flex; flex-wrap: wrap; gap: 8px"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ TEACHERS ═══ -->
+        <div class="panel" id="panel-teachers">
+          <div class="panel-header">
+            <div class="panel-title">Teacher Pool</div>
+            <div class="panel-sub">
+              All teachers are defined globally and assigned to subjects across
+              classes. Cross-class conflicts are detected automatically.
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="g2" style="margin-bottom: 16px">
+              <div class="card">
+                <div class="card-title">Add Teacher</div>
+                <div class="g2">
+                  <div class="field">
+                    <label>Teacher ID</label
+                    ><input type="text" id="t-id" placeholder="e.g. T001" />
+                  </div>
+                  <div class="field">
+                    <label>Full Name</label
+                    ><input
+                      type="text"
+                      id="t-name"
+                      placeholder="e.g. Ms. Ana Reyes"
+                    />
+                  </div>
+                </div>
+                <div class="g2">
+                  <div class="field">
+                    <label>Department</label>
+                    <input
+                      type="text"
+                      id="t-dept"
+                      placeholder="e.g. Mathematics"
+                    />
+                  </div>
+                  <div class="field">
+                    <label style="display: flex; align-items: center; gap: 6px">
+                      Max Periods/Week
+                      <span
+                        style="
+                          font-size: 10px;
+                          color: var(--text3);
+                          font-weight: 400;
+                          line-height: 1.3;
+                        "
+                        >the teacher's total weekly teaching capacity</span
+                      >
+                    </label>
+                    <input
+                      type="number"
+                      id="t-maxp"
+                      min="1"
+                      max="40"
+                      value="25"
+                      placeholder="25"
+                    />
+                    <div
+                      style="
+                        font-size: 11px;
+                        color: var(--text3);
+                        margin-top: 4px;
+                        line-height: 1.5;
+                      "
+                    >
+                      The maximum number of class sessions this teacher can
+                      handle per week across <em>all</em> their assigned
+                      classes. The algorithm uses this as a hard cap — if their
+                      actual assigned sessions exceed this, the load bar turns
+                      red. A typical full-time teacher handles 20–30
+                      periods/week.
+                    </div>
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-full" onclick="addTeacher()">
+                  + Add Teacher
+                </button>
+              </div>
+              <div class="card">
+                <div class="card-title">Workload Summary</div>
+                <canvas
+                  id="teacherLoadChart"
+                  height="160"
+                  style="width: 100%"
+                ></canvas>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="teacherTable">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Department</th>
+                    <th>Max Periods</th>
+                    <th>Assigned</th>
+                    <th>Load %</th>
+                    <th>Availability</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="teacherTbody">
+                  <tr>
+                    <td
+                      colspan="8"
+                      style="
+                        text-align: center;
+                        color: var(--text3);
+                        padding: 30px;
+                      "
+                    >
+                      No teachers added yet
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ CLASSES ═══ -->
+        <div class="panel" id="panel-classes">
+          <div class="panel-header" style="padding-bottom: 16px">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+              "
+            >
+              <div>
+                <div class="panel-title">Classes & Subjects</div>
+                <div class="panel-sub">
+                  Select a class to configure its subjects. Each subject is
+                  linked to a teacher from the global pool.
+                </div>
+              </div>
+              <button
+                class="btn btn-secondary btn-sm"
+                onclick="addSectionModal()"
+              >
+                + Add Section
+              </button>
+            </div>
+          </div>
+          <div class="panel-body" style="padding-top: 0">
+            <div class="classes-layout">
+              <div class="class-picker" id="classPicker"></div>
+              <div class="class-editor" id="classEditor">
+                <div class="empty-state">
+                  <div class="ei">📚</div>
+                  <p>Select a class from the left to configure its subjects</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ CONSTRAINTS ═══ -->
+        <div class="panel" id="panel-constraints">
+          <div class="panel-header">
+            <div class="panel-title">Constraints</div>
+            <div class="panel-sub">
+              Define rules the algorithm must follow when generating timetables
+              for all classes
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="g2">
+              <div>
+                <div class="card">
+                  <div class="card-title">
+                    🔴 Hard Constraints
+                    <span
+                      style="
+                        font-size: 10px;
+                        color: var(--text3);
+                        margin-left: 6px;
+                      "
+                      >Must always be satisfied</span
+                    >
+                  </div>
+                  <div id="hard-constraints"></div>
+                </div>
+                <div class="card" style="margin-top: 16px">
+                  <div class="card-title">
+                    🟡 Soft Constraints
+                    <span
+                      style="
+                        font-size: 10px;
+                        color: var(--text3);
+                        margin-left: 6px;
+                      "
+                      >Optimized if possible</span
+                    >
+                  </div>
+                  <div id="soft-constraints"></div>
+                </div>
+              </div>
+              <div>
+                <div class="card">
+                  <div class="card-title">Penalty Weights</div>
+                  <div
+                    style="
+                      font-size: 12px;
+                      color: var(--text2);
+                      line-height: 1.6;
+                      margin-bottom: 14px;
+                      padding: 10px 12px;
+                      background: var(--s3);
+                      border-radius: var(--r-sm);
+                      border-left: 2px solid var(--accent);
+                    "
+                  >
+                    The algorithm starts with a
+                    <strong style="color: var(--text)"
+                      >base score of 5,000</strong
+                    >
+                    and deducts points for every rule violation. It then tries
+                    to maximize this score. A perfect timetable scores 5,000.
+                  </div>
+
+                  <div class="field">
+                    <label style="display: flex; align-items: center; gap: 6px">
+                      🔴 Hard Constraint Penalty
+                      <span
+                        style="
+                          font-size: 10px;
+                          color: var(--text3);
+                          font-weight: 400;
+                        "
+                        >deducted per hard violation</span
+                      >
+                    </label>
+                    <div class="range-row">
+                      <input
+                        type="range"
+                        id="hw"
+                        min="50"
+                        max="1000"
+                        value="200"
+                        step="50"
+                        oninput="
+                          this.nextElementSibling.textContent = this.value
+                        "
+                      /><span class="rv">200</span>
+                    </div>
+                    <div
+                      style="
+                        font-size: 11px;
+                        color: var(--text3);
+                        margin-top: 4px;
+                      "
+                    >
+                      Higher = algorithm avoids hard violations more
+                      aggressively. Example: with 200, a single teacher conflict
+                      costs −200 points.
+                    </div>
+                  </div>
+
+                  <div class="field" style="margin-top: 12px">
+                    <label style="display: flex; align-items: center; gap: 6px">
+                      🟡 Soft Constraint Penalty
+                      <span
+                        style="
+                          font-size: 10px;
+                          color: var(--text3);
+                          font-weight: 400;
+                        "
+                        >deducted per soft violation</span
+                      >
+                    </label>
+                    <div class="range-row">
+                      <input
+                        type="range"
+                        id="sw"
+                        min="1"
+                        max="100"
+                        value="15"
+                        oninput="
+                          this.nextElementSibling.textContent = this.value
+                        "
+                      /><span class="rv">15</span>
+                    </div>
+                    <div
+                      style="
+                        font-size: 11px;
+                        color: var(--text3);
+                        margin-top: 4px;
+                      "
+                    >
+                      Lower = soft rules are more relaxed (e.g. subject
+                      placement preference). Raise this to enforce soft rules
+                      more strictly.
+                    </div>
+                  </div>
+
+                  <div
+                    style="
+                      margin-top: 14px;
+                      padding: 10px 12px;
+                      background: var(--s3);
+                      border-radius: var(--r-sm);
+                      border: 1px solid var(--border);
+                    "
+                  >
+                    <div
+                      style="
+                        font-size: 11px;
+                        font-family: var(--mono);
+                        color: var(--text3);
+                        margin-bottom: 8px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.8px;
+                      "
+                    >
+                      Recommended ratio
+                    </div>
+                    <div style="font-size: 12px; color: var(--text2)">
+                      Hard penalty should be
+                      <strong style="color: var(--accent-y)">10–20×</strong> the
+                      soft penalty so the algorithm always fixes hard violations
+                      first before optimizing soft ones. Default 200 / 15 ≈ 13×.
+                    </div>
+                  </div>
+                </div>
+                <div class="card" style="margin-top: 16px">
+                  <div class="card-title">Cross-Class Rules</div>
+                  <div
+                    style="
+                      font-size: 13px;
+                      color: var(--text2);
+                      line-height: 1.8;
+                    "
+                  >
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        margin-bottom: 8px;
+                      "
+                    >
+                      <span style="color: var(--accent-g)">✓</span> Teacher
+                      cannot teach two classes simultaneously
+                    </div>
+                    <div
+                      style="
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        margin-bottom: 8px;
+                      "
+                    >
+                      <span style="color: var(--accent-g)">✓</span> Teacher
+                      weekly load cannot exceed configured max
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <span style="color: var(--accent-g)">✓</span> All required
+                      periods per class must be scheduled
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ IMPORT EXCEL ═══ -->
+        <div class="panel" id="panel-import">
+          <div class="panel-header">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+              "
+            >
+              <div>
+                <div class="panel-title">Import from Excel</div>
+                <div class="panel-sub">
+                  Upload your .xlsx file with teachers, classes, and subjects —
+                  or download the template to get started
+                </div>
+              </div>
+              <button class="btn btn-primary" onclick="downloadTemplate()">
+                ⬇ Download Template
+              </button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="g2">
+              <!-- LEFT: Upload + preview -->
+              <div>
+                <div class="drop-zone" id="dropZone">
+                  <input
+                    type="file"
+                    id="xlsxInput"
+                    accept=".xlsx,.xls"
+                    onchange="handleFileSelect(this)"
+                  />
+                  <div class="drop-icon">📊</div>
+                  <div class="drop-title">Drop your Excel file here</div>
+                  <div class="drop-sub">
+                    or click to browse &nbsp;·&nbsp; Accepts .xlsx / .xls
+                  </div>
+                </div>
+
+                <div
+                  id="previewSection"
+                  style="margin-top: 16px; display: none"
+                >
+                  <div class="sheet-tabs" id="sheetTabs"></div>
+                  <div
+                    style="
+                      max-height: 360px;
+                      overflow: auto;
+                      border-radius: var(--r);
+                      border: 1px solid var(--border);
+                    "
+                  >
+                    <table class="preview-table" id="previewTable"></table>
+                  </div>
+                  <div id="importMessages" style="margin-top: 12px"></div>
+                  <button
+                    class="btn btn-success btn-full"
+                    style="margin-top: 14px"
+                    id="applyImportBtn"
+                    onclick="applyImport()"
+                  >
+                    ✅ Apply Import to ScheduleForge
+                  </button>
+                </div>
+              </div>
+
+              <!-- RIGHT: Guide + schema -->
+              <div>
+                <div class="card">
+                  <div class="card-title">How to Import</div>
+                  <div class="import-step">
+                    <div class="step-num" id="istep1">1</div>
+                    <div class="step-body">
+                      <div class="step-title">Download the Template</div>
+                      <div class="step-desc">
+                        Click "Download Template" above. It contains 3
+                        pre-formatted sheets with sample data and correct
+                        headers.
+                      </div>
+                    </div>
+                  </div>
+                  <div class="import-step">
+                    <div class="step-num" id="istep2">2</div>
+                    <div class="step-body">
+                      <div class="step-title">Fill in Your Data</div>
+                      <div class="step-desc">
+                        Edit the <strong>teachers</strong>,
+                        <strong>classes</strong>, and
+                        <strong>subjects</strong> sheets. Keep the header row
+                        exactly as-is.
+                      </div>
+                    </div>
+                  </div>
+                  <div class="import-step">
+                    <div class="step-num" id="istep3">3</div>
+                    <div class="step-body">
+                      <div class="step-title">Upload & Preview</div>
+                      <div class="step-desc">
+                        Drop or select your file above. Use the tabs to preview
+                        each sheet before applying.
+                      </div>
+                    </div>
+                  </div>
+                  <div class="import-step">
+                    <div class="step-num" id="istep4">4</div>
+                    <div class="step-body">
+                      <div class="step-title">Apply Import</div>
+                      <div class="step-desc">
+                        Click Apply — teachers, grade levels, sections, and
+                        subjects are all populated automatically.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card" style="margin-top: 16px">
+                  <div class="card-title" style="margin-bottom: 14px">
+                    Required Columns per Sheet
+                  </div>
+
+                  <div style="margin-bottom: 14px">
+                    <div
+                      style="
+                        font-size: 12px;
+                        font-weight: 600;
+                        margin-bottom: 7px;
+                        color: var(--text);
+                      "
+                    >
+                      📋 Sheet:
+                      <code style="color: var(--accent)">teachers</code>
+                    </div>
+                    <table
+                      style="
+                        width: 100%;
+                        font-size: 12px;
+                        border-collapse: collapse;
+                      "
+                    >
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">teacher_id</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Unique ID, e.g. T001
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">teacher_name</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Full name
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-opt">department</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Optional
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-opt">max_periods_per_week</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Default: 30
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
+
+                  <div style="margin-bottom: 14px">
+                    <div
+                      style="
+                        font-size: 12px;
+                        font-weight: 600;
+                        margin-bottom: 7px;
+                        color: var(--text);
+                      "
+                    >
+                      📋 Sheet:
+                      <code style="color: var(--accent)">classes</code>
+                    </div>
+                    <table
+                      style="
+                        width: 100%;
+                        font-size: 12px;
+                        border-collapse: collapse;
+                      "
+                    >
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">grade_level</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Number: 7–12
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">section_name</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          e.g. Section A
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
+
+                  <div>
+                    <div
+                      style="
+                        font-size: 12px;
+                        font-weight: 600;
+                        margin-bottom: 7px;
+                        color: var(--text);
+                      "
+                    >
+                      📋 Sheet:
+                      <code style="color: var(--accent)">subjects</code>
+                    </div>
+                    <table
+                      style="
+                        width: 100%;
+                        font-size: 12px;
+                        border-collapse: collapse;
+                      "
+                    >
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">grade_level</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Must match classes sheet
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">section_name</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Must match classes sheet
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">subject_code</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          e.g. MATH7
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">subject_name</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Full subject name
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">periods_per_week</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Integer 1–10
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">duration_minutes</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Minutes per session, e.g. 60
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; color: var(--text2)">
+                          <span class="col-req">teacher_id</span>
+                        </td>
+                        <td style="padding: 4px 8px; color: var(--text3)">
+                          Must match teachers sheet
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ GENERATE ═══ -->
+        <div class="panel" id="panel-generate">
+          <div class="panel-header">
+            <div class="panel-title">Generate Timetables</div>
+            <div class="panel-sub">
+              Schedules all classes simultaneously, respecting cross-class
+              teacher conflicts
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="g2">
+              <div>
+                <div class="card">
+                  <div class="card-title">Algorithm</div>
+                  <div class="algo-cards">
+                    <div
+                      class="algo-card sel"
+                      id="algo-ga"
+                      onclick="selAlgo('ga')"
+                    >
+                      <div class="algo-emoji">🧬</div>
+                      <div class="algo-name">Genetic</div>
+                      <div class="algo-desc">
+                        Population-based evolutionary search with crossover &
+                        mutation across all classes
+                      </div>
+                    </div>
+                    <div class="algo-card" id="algo-sa" onclick="selAlgo('sa')">
+                      <div class="algo-emoji">🌡️</div>
+                      <div class="algo-name">Simulated Annealing</div>
+                      <div class="algo-desc">
+                        Probabilistic hill-climbing that escapes local optima
+                        via temperature cooling
+                      </div>
+                    </div>
+                    <div class="algo-card" id="algo-cp" onclick="selAlgo('cp')">
+                      <div class="algo-emoji">🔐</div>
+                      <div class="algo-name">Constraint Prog.</div>
+                      <div class="algo-desc">
+                        Backtracking search with forward-checking for guaranteed
+                        constraint satisfaction
+                      </div>
+                    </div>
+                  </div>
+
+                  <div id="params-ga">
+                    <div
+                      style="
+                        font-size: 11px;
+                        color: var(--text3);
+                        margin-bottom: 10px;
+                        padding: 8px 12px;
+                        background: var(--s3);
+                        border-radius: var(--r-sm);
+                        line-height: 1.6;
+                      "
+                    >
+                      🧬 The
+                      <strong style="color: var(--text)"
+                        >Genetic Algorithm</strong
+                      >
+                      mimics natural selection — it evolves a population of
+                      candidate timetables over many generations, combining the
+                      best ones (crossover) and occasionally making small random
+                      changes (mutation) to find an optimal solution.
+                    </div>
+                    <div class="g2">
+                      <div class="field">
+                        <label>Population Size</label>
+                        <div class="range-row">
+                          <input
+                            type="range"
+                            id="ga-pop"
+                            min="10"
+                            max="100"
+                            value="40"
+                            oninput="
+                              this.nextElementSibling.textContent = this.value
+                            "
+                          /><span class="rv">40</span>
+                        </div>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 4px;
+                            line-height: 1.5;
+                          "
+                        >
+                          How many
+                          <strong style="color: var(--text2)"
+                            >different timetable drafts</strong
+                          >
+                          the algorithm works with simultaneously each
+                          generation. Think of it as how many "attempts" compete
+                          against each other at once.<br />
+                          <span style="color: var(--accent-g)">↑ Higher</span> =
+                          explores more solutions, better quality — but
+                          <span style="color: var(--accent-r)">slower</span
+                          >.<br />
+                          <span style="color: var(--accent-y)">↓ Lower</span> =
+                          faster but may miss better solutions.<br />
+                          <em>Recommended: 30–60 for most schools.</em>
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Generations</label>
+                        <div class="range-row">
+                          <input
+                            type="range"
+                            id="ga-gen"
+                            min="50"
+                            max="500"
+                            value="150"
+                            step="25"
+                            oninput="
+                              this.nextElementSibling.textContent = this.value
+                            "
+                          /><span class="rv">150</span>
+                        </div>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 4px;
+                            line-height: 1.5;
+                          "
+                        >
+                          How many
+                          <strong style="color: var(--text2)"
+                            >evolutionary cycles</strong
+                          >
+                          to run. Each generation, the worst timetables are
+                          discarded and replaced with new ones bred from the
+                          best.<br />
+                          <span style="color: var(--accent-g)"
+                            >↑ More generations</span
+                          >
+                          = more refinement, higher fitness — but takes
+                          longer.<br />
+                          <span style="color: var(--accent-y)">↓ Fewer</span> =
+                          quick result, less polished.<br />
+                          <em>Recommended: 100–200 for good results.</em>
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Mutation Rate</label>
+                        <div class="range-row">
+                          <input
+                            type="range"
+                            id="ga-mut"
+                            min="1"
+                            max="30"
+                            value="8"
+                            oninput="
+                              this.nextElementSibling.textContent =
+                                this.value + '%'
+                            "
+                          /><span class="rv">8%</span>
+                        </div>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 4px;
+                            line-height: 1.5;
+                          "
+                        >
+                          The chance that a random period swap is applied to a
+                          timetable after breeding. Prevents the algorithm from
+                          getting stuck on a "good enough" schedule by
+                          introducing variety.<br />
+                          <span style="color: var(--accent-g)">↑ Higher</span> =
+                          more exploration, escapes local traps — but too high
+                          makes it chaotic (random search).<br />
+                          <span style="color: var(--accent-y)">↓ Lower</span> =
+                          more stable convergence — but risks getting stuck.<br />
+                          <em>Recommended: 5–12% for typical schedules.</em>
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Elitism</label>
+                        <div class="range-row">
+                          <input
+                            type="range"
+                            id="ga-elite"
+                            min="5"
+                            max="30"
+                            value="15"
+                            oninput="
+                              this.nextElementSibling.textContent =
+                                this.value + '%'
+                            "
+                          /><span class="rv">15%</span>
+                        </div>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 4px;
+                            line-height: 1.5;
+                          "
+                        >
+                          The top % of timetables that are
+                          <strong style="color: var(--text2)"
+                            >carried over unchanged</strong
+                          >
+                          to the next generation, guaranteeing the best
+                          solutions are never lost.<br />
+                          <span style="color: var(--accent-g)">↑ Higher</span> =
+                          best solutions are protected longer, steady
+                          improvement.<br />
+                          <span style="color: var(--accent-y)">↓ Lower</span> =
+                          more exploration but risks losing good solutions.<br />
+                          <em
+                            >Recommended: 10–20%. At 15%, the top 6 out of 40
+                            timetables survive each cycle.</em
+                          >
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div id="params-sa" style="display: none">
+                    <div
+                      style="
+                        font-size: 11px;
+                        color: var(--text3);
+                        margin-bottom: 10px;
+                        padding: 8px 12px;
+                        background: var(--s3);
+                        border-radius: var(--r-sm);
+                        line-height: 1.6;
+                      "
+                    >
+                      🌡️
+                      <strong style="color: var(--text)"
+                        >Simulated Annealing</strong
+                      >
+                      works like a cooling metal — it starts "hot" (willing to
+                      accept worse solutions to escape traps) and gradually
+                      "cools" (becoming more selective). A single timetable is
+                      refined step-by-step rather than evolving a whole
+                      population. Faster than GA but can get stuck on complex
+                      schools.
+                    </div>
+                    <div class="g2">
+                      <div class="field">
+                        <label>Initial Temperature</label>
+                        <div class="range-row">
+                          <input
+                            type="range"
+                            id="sa-temp"
+                            min="500"
+                            max="20000"
+                            value="5000"
+                            step="500"
+                            oninput="
+                              this.nextElementSibling.textContent = this.value
+                            "
+                          /><span class="rv">5000</span>
+                        </div>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 4px;
+                            line-height: 1.5;
+                          "
+                        >
+                          Controls how
+                          <strong style="color: var(--text2)"
+                            >willing the algorithm is to accept a worse
+                            solution</strong
+                          >
+                          at the start. At high temperature, even significantly
+                          worse timetables are accepted — this lets it escape
+                          from local traps early on.<br />
+                          <span style="color: var(--accent-g)">↑ Higher</span> =
+                          more exploration at the start, better at escaping bad
+                          starting points — but takes longer to settle.<br />
+                          <span style="color: var(--accent-y)">↓ Lower</span> =
+                          starts conservative, faster but may get stuck.<br />
+                          <em
+                            >Recommended: 3,000–8,000 for most school sizes.</em
+                          >
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Cooling Rate</label>
+                        <div class="range-row">
+                          <input
+                            type="range"
+                            id="sa-cool"
+                            min="90"
+                            max="99"
+                            value="96"
+                            oninput="
+                              this.nextElementSibling.textContent =
+                                '0.' + this.value
+                            "
+                          /><span class="rv">0.96</span>
+                        </div>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 4px;
+                            line-height: 1.5;
+                          "
+                        >
+                          How quickly the temperature drops each step.
+                          Temperature is multiplied by this value every
+                          iteration — so 0.96 means temperature shrinks by 4%
+                          each step.<br />
+                          <span style="color: var(--accent-g)"
+                            >↑ Closer to 1.0 (e.g. 0.99)</span
+                          >
+                          = cools slowly, more exploration, better quality — but
+                          needs more iterations to finish.<br />
+                          <span style="color: var(--accent-y)"
+                            >↓ Lower (e.g. 0.90)</span
+                          >
+                          = cools fast, finishes quickly — but may freeze before
+                          finding a good solution.<br />
+                          <em
+                            >Recommended: 0.95–0.97. At 0.96 with 2,000
+                            iterations, temperature drops from 5,000 to ~≈5.</em
+                          >
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Iterations</label>
+                        <div class="range-row">
+                          <input
+                            type="range"
+                            id="sa-iter"
+                            min="500"
+                            max="10000"
+                            value="2000"
+                            step="250"
+                            oninput="
+                              this.nextElementSibling.textContent = this.value
+                            "
+                          /><span class="rv">2000</span>
+                        </div>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 4px;
+                            line-height: 1.5;
+                          "
+                        >
+                          Total number of
+                          <strong style="color: var(--text2)"
+                            >swap attempts</strong
+                          >
+                          to make. Each iteration randomly swaps two periods in
+                          the current timetable and decides whether to keep or
+                          discard the change.<br />
+                          <span style="color: var(--accent-g)"
+                            >↑ More iterations</span
+                          >
+                          = more refinement steps, higher quality — directly
+                          proportional to runtime.<br />
+                          <span style="color: var(--accent-y)">↓ Fewer</span> =
+                          faster, but the temperature may still be too high when
+                          it stops (not fully settled).<br />
+                          <em
+                            >Recommended: match to cooling rate — enough
+                            iterations for temperature to reach near zero. 2,000
+                            pairs well with 0.96.</em
+                          >
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div id="params-cp" style="display: none">
+                    <div
+                      style="
+                        font-size: 11px;
+                        color: var(--text3);
+                        margin-bottom: 10px;
+                        padding: 8px 12px;
+                        background: var(--s3);
+                        border-radius: var(--r-sm);
+                        line-height: 1.6;
+                      "
+                    >
+                      🔐
+                      <strong style="color: var(--text)"
+                        >Constraint Programming</strong
+                      >
+                      starts with a random schedule, then systematically detects
+                      rule violations and tries to fix them by swapping
+                      conflicting periods to empty slots. It's the fastest
+                      algorithm but the least flexible — it fixes what it can
+                      find rather than exploring creative solutions. Best used
+                      when you need a quick draft.
+                    </div>
+                    <div class="g2">
+                      <div class="field">
+                        <label>Max Backtracks</label>
+                        <div class="range-row">
+                          <input
+                            type="range"
+                            id="cp-bt"
+                            min="200"
+                            max="10000"
+                            value="2000"
+                            step="200"
+                            oninput="
+                              this.nextElementSibling.textContent = this.value
+                            "
+                          /><span class="rv">2000</span>
+                        </div>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 4px;
+                            line-height: 1.5;
+                          "
+                        >
+                          The maximum number of
+                          <strong style="color: var(--text2)"
+                            >conflict-fixing moves</strong
+                          >
+                          the algorithm is allowed to make. Each time a teacher
+                          conflict is detected, it tries to move one of the
+                          clashing periods to a free slot — that counts as one
+                          backtrack.<br />
+                          <span style="color: var(--accent-g)">↑ Higher</span> =
+                          more attempts to resolve conflicts, better chance of
+                          reaching 0 hard violations.<br />
+                          <span style="color: var(--accent-y)">↓ Lower</span> =
+                          stops sooner, faster but may leave hard violations
+                          unresolved.<br />
+                          <em
+                            >Recommended: 2,000–5,000. Increase if Hard Viols.
+                            stays above 0 after generation.</em
+                          >
+                        </div>
+                      </div>
+                      <div class="field">
+                        <label>Variable Ordering</label>
+                        <select id="cp-order">
+                          <option value="mrv">MRV Heuristic</option>
+                          <option value="degree">Degree Heuristic</option>
+                          <option value="random">Random</option>
+                        </select>
+                        <div
+                          style="
+                            font-size: 11px;
+                            color: var(--text3);
+                            margin-top: 6px;
+                            line-height: 1.5;
+                          "
+                        >
+                          Determines
+                          <strong style="color: var(--text2)"
+                            >which conflict to tackle first</strong
+                          >
+                          when multiple violations exist simultaneously.<br />
+                          <strong style="color: var(--text)"
+                            >MRV (Minimum Remaining Values)</strong
+                          >
+                          — picks the most constrained teacher first (fewest
+                          free slots). Best default choice.<br />
+                          <strong style="color: var(--text)">Degree</strong> —
+                          picks the teacher involved in the most conflicts. Good
+                          for dense schedules with many shared teachers.<br />
+                          <strong style="color: var(--text)">Random</strong> —
+                          picks randomly. Useful to compare against the others
+                          or break ties differently.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div class="card">
+                  <div class="card-title">Generation Status</div>
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      margin-bottom: 6px;
+                    "
+                  >
+                    <span
+                      style="font-size: 12px; color: var(--text2)"
+                      id="gen-label"
+                      >Ready to generate</span
+                    >
+                    <span class="chip chip-blue" id="gen-chip">Idle</span>
+                  </div>
+                  <div class="prog-bar">
+                    <div class="prog-fill" id="prog-fill"></div>
+                  </div>
+                  <div
+                    style="
+                      text-align: right;
+                      font-family: var(--mono);
+                      font-size: 11px;
+                      color: var(--text3);
+                      margin-bottom: 10px;
+                    "
+                    id="prog-pct"
+                  >
+                    0%
+                  </div>
+                  <div class="log-area" id="logArea">
+                    <div class="le i">// ScheduleForge Pro ready</div>
+                    <div class="le">// Waiting for generation command...</div>
+                  </div>
+                  <canvas class="fc" id="fitnessCanvas"></canvas>
+                </div>
+                <div style="margin-top: 12px">
+                  <button
+                    class="btn btn-success btn-full"
+                    id="genBtn"
+                    onclick="startGeneration()"
+                    style="padding: 12px"
+                  >
+                    🚀 Generate All Timetables
+                  </button>
+                </div>
+                <div class="stat-grid" style="margin-top: 12px">
+                  <div
+                    class="stat-box"
+                    title="Fitness score — starts at 5,000. Deducted for each violation. Higher is better. A perfect schedule = 5,000."
+                  >
+                    <div
+                      class="stat-val"
+                      id="st-fit"
+                      style="color: var(--accent)"
+                    >
+                      —
+                    </div>
+                    <div class="stat-lbl">Fitness ↑ better</div>
+                  </div>
+                  <div
+                    class="stat-box"
+                    title="Hard violations — click to see details. Must reach 0 for a valid timetable."
+                    style="cursor: pointer"
+                    onclick="
+                      showPanel('conflicts');
+                      setConflictFilter('hard');
+                    "
+                  >
+                    <div
+                      class="stat-val"
+                      id="st-hard"
+                      style="color: var(--accent-r)"
+                    >
+                      —
+                    </div>
+                    <div class="stat-lbl">Hard Viols. → 0 ↗</div>
+                  </div>
+                  <div
+                    class="stat-box"
+                    title="Soft violations — click to see details. Lower is better but not critical."
+                    style="cursor: pointer"
+                    onclick="
+                      showPanel('conflicts');
+                      setConflictFilter('soft');
+                    "
+                  >
+                    <div
+                      class="stat-val"
+                      id="st-soft"
+                      style="color: var(--accent-y)"
+                    >
+                      —
+                    </div>
+                    <div class="stat-lbl">Soft Viols. ↓ better ↗</div>
+                  </div>
+                  <div
+                    class="stat-box"
+                    title="Generation time in milliseconds. Genetic Algorithm and SA take longer but produce better schedules than CP."
+                  >
+                    <div
+                      class="stat-val"
+                      id="st-time"
+                      style="color: var(--accent-g)"
+                    >
+                      —
+                    </div>
+                    <div class="stat-lbl">Time (ms)</div>
+                  </div>
+                </div>
+                <div
+                  style="
+                    margin-top: 10px;
+                    padding: 10px 14px;
+                    background: var(--s3);
+                    border-radius: var(--r-sm);
+                    border: 1px solid var(--border);
+                    font-size: 11px;
+                    color: var(--text3);
+                    font-family: var(--mono);
+                    letter-spacing: 0.2px;
+                    line-height: 1.7;
+                  "
+                >
+                  💡 Hover over any stat for details.
+                  <strong style="color: var(--accent-r)"
+                    >Hard Viols. must reach 0</strong
+                  >
+                  for a valid timetable. Fitness above 4,500 is generally
+                  excellent.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ CONFLICTS ═══ -->
+        <div class="panel" id="panel-conflicts">
+          <div class="panel-header">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+              "
+            >
+              <div>
+                <div class="panel-title">Conflict Report</div>
+                <div class="panel-sub">
+                  Every rule violation found in the last generated timetable,
+                  grouped by severity
+                </div>
+              </div>
+              <button
+                class="btn btn-secondary btn-sm"
+                onclick="showPanel('generate')"
+              >
+                ↩ Back to Generate
+              </button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div id="conflictsContent">
+              <div class="empty-state">
+                <div class="ei">⚠️</div>
+                <p>Generate timetables first to see conflicts</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ RESULTS ═══ -->
+        <div class="panel" id="panel-results">
+          <div class="panel-header" style="padding-bottom: 12px">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                flex-wrap: wrap;
+                gap: 8px;
+              "
+            >
+              <div>
+                <div class="panel-title">Timetables</div>
+                <div class="panel-sub">
+                  Click any cell to freeze it — frozen slots survive rerolling
+                </div>
+              </div>
+              <div
+                style="
+                  display: flex;
+                  gap: 8px;
+                  flex-wrap: wrap;
+                  align-items: center;
+                "
+              >
+                <div class="view-toggle">
+                  <button class="vt-btn active" onclick="setDayView('week')">
+                    All Week
+                  </button>
+                  <button class="vt-btn" onclick="setDayView('day')">
+                    Day View
+                  </button>
+                </div>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  id="rerollBtn"
+                  onclick="rerollUnfrozen()"
+                  style="display: none"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 14 14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                  >
+                    <path d="M1 3h9a3 3 0 0 1 0 6H4M1 3l3-2M1 3l3 2" />
+                    <path d="M13 11H4a3 3 0 0 1 0-6h6M13 11l-3-2M13 11l-3 2" />
+                  </svg>
+                  Reroll Unfrozen
+                </button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  id="clearFreezeBtn"
+                  onclick="clearAllFrozen()"
+                  style="display: none"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 14 14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                  >
+                    <path d="M2 2l10 10M12 2L2 12" />
+                  </svg>
+                  Clear Frozen
+                </button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  onclick="exportCurrentCSV()"
+                >
+                  ⬇ CSV
+                </button>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  onclick="window.print()"
+                >
+                  🖨 Print
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="panel-body" style="padding-top: 0">
+            <div class="result-layout">
+              <div class="result-nav" id="resultNav"></div>
+              <div class="result-main">
+                <div
+                  id="freeze-bar"
+                  style="display: none; margin-bottom: 10px"
+                  class="freeze-bar"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 14 14"
+                    fill="none"
+                    stroke="var(--accent)"
+                    stroke-width="1.6"
+                  >
+                    <path d="M7 1v12M1 7h12M2.5 2.5l9 9M11.5 2.5l-9 9" />
+                  </svg>
+                  <span class="freeze-count" id="freeze-count-label"
+                    >0 frozen</span
+                  >
+                  <span class="freeze-hint"
+                    >— Click any subject cell to freeze/unfreeze it. Frozen
+                    slots are locked during Reroll.</span
+                  >
+                </div>
+                <div id="day-nav" style="display: none; margin-bottom: 8px">
+                  <div
+                    style="display: flex; gap: 6px; flex-wrap: wrap"
+                    id="dayBtns"
+                  ></div>
+                </div>
+                <div class="result-scroll" id="resultScroll">
+                  <div class="empty-state">
+                    <div class="ei">📋</div>
+                    <p>Generate timetables first, then view them here.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ TEACHER VIEW ═══ -->
+        <div class="panel" id="panel-teacher-view">
+          <div class="panel-header">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+              "
+            >
+              <div>
+                <div class="panel-title">Teacher Schedules</div>
+                <div class="panel-sub">
+                  See each teacher's full weekly load across all classes
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center">
+                <select
+                  id="teacherSelect"
+                  style="width: 220px"
+                  onchange="renderTeacherView()"
+                ></select>
+                <button
+                  class="btn btn-secondary btn-sm"
+                  onclick="exportTeacherCSV()"
+                >
+                  ⬇ CSV
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="panel-body" id="teacherViewBody">
+            <div class="empty-state">
+              <div class="ei">👩‍🏫</div>
+              <p>Generate timetables to view teacher schedules</p>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ADD GRADE MODAL -->
+    <div class="modal-overlay" id="gradeModal">
+      <div class="modal">
+        <div class="modal-title">Add Grade Level</div>
+        <div class="field">
+          <label>Grade Level</label>
+          <select id="gm-level">
+            <option value="7">Grade 7</option>
+            <option value="8">Grade 8</option>
+            <option value="9">Grade 9</option>
+            <option value="10">Grade 10</option>
+            <option value="11">Grade 11</option>
+            <option value="12">Grade 12</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Number of Sections</label
+          ><input
+            type="number"
+            id="gm-sections"
+            min="1"
+            max="20"
+            value="3"
+            placeholder="3"
+          />
+        </div>
+        <div class="field">
+          <label>Section Naming</label>
+          <select id="gm-naming">
+            <option value="alpha">Alphabetical (A, B, C…)</option>
+            <option value="num">Numerical (1, 2, 3…)</option>
+            <option value="custom">Custom prefix</option>
+          </select>
+        </div>
+        <div class="field" id="gm-prefix-field" style="display: none">
+          <label>Section Prefix</label
+          ><input
+            type="text"
+            id="gm-prefix"
+            placeholder="e.g. Rizal, Bonifacio…"
+          />
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" onclick="closeModal('gradeModal')">
+            Cancel
+          </button>
+          <button class="btn btn-primary" onclick="confirmAddGrade()">
+            Add Grade
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADD SECTION MODAL -->
+    <div class="modal-overlay" id="sectionModal">
+      <div class="modal">
+        <div class="modal-title">Add Section</div>
+        <div class="field">
+          <label>Grade Level</label
+          ><select id="sm-grade" id="sm-grade"></select>
+        </div>
+        <div class="field">
+          <label>Section Name</label
+          ><input type="text" id="sm-name" placeholder="e.g. Section D" />
+        </div>
+        <div class="modal-actions">
+          <button
+            class="btn btn-secondary"
+            onclick="closeModal('sectionModal')"
+          >
+            Cancel
+          </button>
+          <button class="btn btn-primary" onclick="confirmAddSection()">
+            Add Section
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TEACHER AVAILABILITY MODAL -->
+    <div class="modal-overlay" id="availModal">
+      <div class="modal" style="width: 580px; max-width: 98vw">
+        <div class="modal-title" id="availModalTitle">Teacher Availability</div>
+        <div
+          style="
+            font-size: 12px;
+            color: var(--text2);
+            margin-bottom: 16px;
+            line-height: 1.6;
+            padding: 10px 12px;
+            background: var(--s3);
+            border-radius: var(--r-sm);
+            border-left: 2px solid var(--accent-y);
+          "
+        >
+          ⚠ These are
+          <strong style="color: var(--text)">soft constraints</strong> — the
+          algorithm strongly avoids scheduling this teacher during blocked
+          times, but may still place them there if no other slot is available.
+          Violations cost
+          <strong style="color: var(--accent-y)">×3 the soft penalty</strong>
+          each.
+        </div>
+
+        <div
+          style="
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+          "
+        >
+          <div style="font-size: 12px; font-weight: 600; color: var(--text)">
+            Unavailability Blocks
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="addAvailBlock()">
+            + Add Block
+          </button>
+        </div>
+
+        <div
+          id="availBlocks"
+          style="
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 320px;
+            overflow-y: auto;
+            margin-bottom: 12px;
+          "
+        ></div>
+
+        <div
+          id="availEmpty"
+          style="
+            display: none;
+            padding: 20px;
+            text-align: center;
+            color: var(--text3);
+            font-size: 12px;
+            background: var(--s3);
+            border-radius: var(--r-sm);
+          "
+        >
+          No blocks added — this teacher is available all week.
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn btn-secondary" onclick="closeModal('availModal')">
+            Cancel
+          </button>
+          <button class="btn btn-primary" onclick="saveAvailability()">
+            Save Availability
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
