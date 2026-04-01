@@ -3,16 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ScheduleForge Pro — Multi-Class Timetable Generator</title>
+    <title>Timetable Generator</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
-    <link rel="stylesheet" href="ss.css" />
+    <!-- <link rel="stylesheet" href="ss.css" /> -->
+    <link rel="stylesheet" href="v2.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   </head>
   <body>
     <!-- TOPBAR -->
     <div class="topbar">
-      <div class="topbar-logo">Schedule<span>Forge</span> <em>PRO</em></div>
+      <div class="topbar-logo">Timetable<span>Generator</span></div>
       <div class="topbar-divider"></div>
       <div class="topbar-school" id="topSchoolName">Untitled School</div>
       <div class="topbar-right">
@@ -345,7 +346,7 @@
                     <table class="preview-table" id="previewTable"></table>
                   </div>
                   <div id="importMessages" style="margin-top:12px"></div>
-                  <button class="btn btn-success btn-full" style="margin-top:14px" id="applyImportBtn" onclick="applyImport()">✅ Apply Import to ScheduleForge</button>
+                  <button class="btn btn-success btn-full" style="margin-top:14px" id="applyImportBtn" onclick="applyImport()">✅ Apply Import to Timetable Generator</button>
                 </div>
               </div>
               <div>
@@ -545,7 +546,7 @@
                   <div class="prog-bar"><div class="prog-fill" id="prog-fill"></div></div>
                   <div style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:10px" id="prog-pct">0%</div>
                   <div class="log-area" id="logArea">
-                    <div class="le i">// ScheduleForge Pro ready</div>
+                    <div class="le i">// Timetable Generator ready</div>
                     <div class="le">// Waiting for generation command...</div>
                   </div>
                   <canvas class="fc" id="fitnessCanvas"></canvas>
