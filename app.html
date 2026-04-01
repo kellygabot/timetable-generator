@@ -604,14 +604,13 @@
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
               <div>
                 <div class="panel-title">Timetables</div>
-                <div class="panel-sub">Click any cell to freeze it. Toggle between teacher names and room assignments using the new button. Shorter days show END OF DAY marker.</div>
+                <div class="panel-sub">Click any cell to freeze it. Rooms shown per subject (📍). Shorter days show END OF DAY marker.</div>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
                 <div class="view-toggle">
                   <button class="vt-btn active" onclick="setDayView('week')">All Week</button>
                   <button class="vt-btn" onclick="setDayView('day')">Day View</button>
                 </div>
-                <button class="btn btn-secondary btn-sm" id="toggleRoomsBtn" onclick="toggleShowRooms()">Show Rooms</button>
                 <button class="btn btn-secondary btn-sm" id="rerollBtn" onclick="rerollUnfrozen()" style="display:none">
                   <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 3h9a3 3 0 0 1 0 6H4M1 3l3-2M1 3l3 2"/><path d="M13 11H4a3 3 0 0 1 0-6h6M13 11l-3-2M13 11l-3 2"/></svg>
                   Reroll Unfrozen
