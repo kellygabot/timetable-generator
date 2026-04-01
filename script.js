@@ -7,15 +7,15 @@ const state = {
     year: "",
     semester: "1st Semester",
     numDays: 5,
-    periodsPerDay: 8,
-    startTime: "07:00",
+    periodsPerDay: 6,
+    startTime: "08:00",
     endTime: "15:15",
     dayEndTimes: ["15:15", "15:15", "14:15", "15:15", "15:15"],
-    dayPeriods: [8, 8, 8, 8, 8], // per-day period override; null = use global periodsPerDay
+    dayPeriods: [6, 6, 5, 6, 6], // per-day period override; null = use global periodsPerDay
     numBreaks: 2,
     breaks: [
-      { afterPeriod: 3, duration: 15 },
-      { afterPeriod: 6, duration: 50 },
+      { afterPeriod: 1, duration: 15 },
+      { afterPeriod: 3, duration: 30 },
     ],
   },
   gradeLevels: [],
@@ -24,12 +24,12 @@ const state = {
   constraints: {
     noTeacherConflict: true,
     allPeriodsPlaced: true,
-    noBackToBack: true,
-    maxConsec: true,
-    balance: true,
-    morningCore: true,
-    afternoonPE: true,
-    minTeacherIdle: true,
+    noBackToBack: false,
+    maxConsec: false,
+    balance: false,
+    morningCore: false,
+    afternoonPE: false,
+    minTeacherIdle: false,
     noRoomConflict: true,
   },
   results: null,
@@ -144,7 +144,7 @@ function renderDayEndTimes() {
       (dayEndTimes && dayEndTimes[i]) || state.school.endTime || "15:15";
     const perDay =
       dayPeriods && dayPeriods[i] != null ? dayPeriods[i] : periodsPerDay;
-    const startMin = t2m(startTime || "07:00");
+    const startMin = t2m(startTime || "08:00");
     const endMin = t2m(endVal);
     const totalMin = endMin - startMin;
     const hrs = Math.floor(totalMin / 60),
@@ -190,7 +190,7 @@ function getPeriodsForDay(d, grade) {
   // 2. Fall back to computing from end time
   const dayEndTimes = state.school.dayEndTimes || [];
   const endTime = dayEndTimes[d] || state.school.endTime || "15:15";
-  const startMin = t2m(state.school.startTime || "07:00");
+  const startMin = t2m(state.school.startTime || "08:00");
   const endMin = t2m(endTime);
   const breaks = grade && grade.breaks ? grade.breaks : state.school.breaks;
   const periodsPerDay = state.school.periodsPerDay;
@@ -345,7 +345,7 @@ function updateSchoolPreview() {
     document.getElementById("periodsPerDay").value,
   );
   state.school.startTime =
-    document.getElementById("startTime").value || "07:00";
+    document.getElementById("startTime").value || "08:00";
   const endEl = document.getElementById("endTime");
   if (endEl) state.school.endTime = endEl.value || "15:15";
 
@@ -392,6 +392,43 @@ function updateTopChips() {
     state.teachers.length + " teachers";
   document.getElementById("nb-teachers").textContent = state.teachers.length;
   document.getElementById("nb-classes").textContent = tc;
+}
+
+// ── TEACHER MULTI-SELECT HELPERS ──
+function toggleTeacherDropdown() {
+  const list = document.getElementById("teacher-list-content");
+  if (!list) return;
+  const isDirectlyHidden = list.style.display === "none";
+  list.style.display = isDirectlyHidden ? "block" : "none";
+  
+  // Close when clicking outside
+  if (isDirectlyHidden) {
+    const closer = (e) => {
+      if (!e.target.closest('.multi-select-dropdown')) {
+        list.style.display = 'none';
+        document.removeEventListener('click', closer);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closer), 10);
+  }
+}
+
+function updateSelectedTeachersDisplay() {
+  const checks = document.querySelectorAll('input[name="subj-teacher-check"]:checked');
+  const label = document.getElementById("teacher-selected-labels");
+  if (!label) return;
+  
+  if (checks.length === 0) {
+    label.textContent = "Choose teachers...";
+    label.style.color = "var(--text3)";
+  } else {
+    const names = Array.from(checks).map(c => {
+      const t = state.teachers.find(teacher => teacher.id === c.value);
+      return t ? t.name : c.value;
+    });
+    label.textContent = names.join(", ");
+    label.style.color = "var(--accent)";
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -944,12 +981,21 @@ function renderClassEditor() {
         <div class="field" style="grid-column:1/-1">
           <label style="display:flex;align-items:center;gap:8px">
             Assign Teachers
-            <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">Hold Ctrl / Cmd to select multiple. Each teacher is credited the full session load.</span>
+            <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">Select all teachers for this subject.</span>
           </label>
-          <select id="e-teacher" multiple style="height:${Math.max(80, Math.min(160, state.teachers.length * 28))}px;border-radius:var(--r-sm)">
-            ${state.teachers.map((t) => `<option value="${t.id}" ${editTeacherIds.includes(t.id) ? "selected" : ""}>${t.name} (${t.id}) — ${t.dept || "no dept"}</option>`).join("")}
-          </select>
-          ${state.teachers.length === 0 ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">Add teachers first in the Teachers panel.</div>` : ""}
+          <div class="multi-select-dropdown" id="e-teacher-dropdown" style="position:relative">
+            <div class="dropdown-toggle" onclick="toggleTeacherDropdown()" style="padding:10px 14px; border:1px solid var(--border2); border-radius:var(--r-sm); background:var(--s1); cursor:pointer; min-height:42px; display:flex; align-items:center; flex-wrap:wrap; gap:4px">
+              <span id="teacher-selected-labels" style="font-size:12px; color:var(--text3)">Choose teachers...</span>
+            </div>
+            <div class="dropdown-list" id="teacher-list-content" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--s1); border:1px solid var(--border2); border-top:none; box-shadow:var(--shadow-lg); border-radius:0 0 var(--r-sm) var(--r-sm); z-index:200; max-height:240px; overflow-y:auto; padding:8px 0">
+              ${state.teachers.length === 0 ? `<div style="padding:12px 16px; font-size:12px; color:var(--text3)">Add teachers first in the Teachers panel.</div>` : state.teachers.map(t => `
+                <label style="display:flex; align-items:center; gap:10px; padding:8px 16px; cursor:pointer; font-weight:500; font-size:13px; transition:var(--transition); margin:0" onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background='var(--s1)'">
+                  <input type="checkbox" name="subj-teacher-check" value="${t.id}" ${editTeacherIds.includes(t.id) ? "checked" : ""} onchange="updateSelectedTeachersDisplay()">
+                  <span>${t.name} <em style="font-style:normal; font-size:11px; color:var(--text3); margin-left:4px">(${t.id})</em></span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
         </div>
         ${
           state.rooms.length > 0
@@ -996,6 +1042,7 @@ function renderClassEditor() {
         }
       </div>
     </div>`;
+  updateSelectedTeachersDisplay();
 }
 
 function setSectionRoom(sectionId, roomId) {
@@ -1050,13 +1097,9 @@ function addSubjectToClass() {
   const roomEl = document.getElementById("e-room");
   const roomId = roomEl ? roomEl.value : "";
 
-  // Read multi-select
-  const teacherSel = document.getElementById("e-teacher");
-  const teacherIds = teacherSel
-    ? Array.from(teacherSel.selectedOptions)
-        .map((o) => o.value)
-        .filter(Boolean)
-    : [];
+  // Read multi-select checkboxes
+  const teacherChecks = document.querySelectorAll('input[name="subj-teacher-check"]:checked');
+  const teacherIds = Array.from(teacherChecks).map(c => c.value);
 
   if (!code || !name) {
     alert("Code and name required");
@@ -2858,15 +2901,15 @@ function loadDemo() {
   state.school = {
     name: "Rizal NHS",
     numDays: 5,
-    periodsPerDay: 8,
-    startTime: "07:00",
+    periodsPerDay: 6,
+    startTime: "08:00",
     endTime: "15:15",
     dayEndTimes: ["15:15", "15:15", "14:15", "15:15", "15:15"],
-    dayPeriods: [8, 8, 5, 8, 8], // Wednesday only has 5 periods
+    dayPeriods: [6, 6, 5, 6, 6], // Wednesday only has 5 periods
     numBreaks: 2,
     breaks: [
-      { afterPeriod: 3, duration: 15 },
-      { afterPeriod: 6, duration: 50 },
+      { afterPeriod: 1, duration: 15 },
+      { afterPeriod: 3, duration: 30 },
     ],
   };
 

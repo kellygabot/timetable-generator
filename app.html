@@ -106,7 +106,7 @@
                 <div class="card" style="margin-top:16px">
                   <div class="card-title">Daily Schedule</div>
                   <div class="g2">
-                    <div class="field"><label>School Start Time</label><input type="time" id="startTime" value="07:00"/></div>
+                    <div class="field"><label>School Start Time</label><input type="time" id="startTime" value="08:00"/></div>
                     <div class="field"><label>Default End Time</label><input type="time" id="endTime" value="15:15" oninput="state.school.endTime=this.value;renderDayEndTimes();updateSchoolPreview()"/></div>
                     <div class="field">
                       <label>School Days Per Week</label>
@@ -119,8 +119,8 @@
                     <div class="field">
                       <label>Periods Per Day</label>
                       <div class="range-row">
-                        <input type="range" id="periodsPerDay" min="4" max="12" value="8" oninput="this.nextElementSibling.textContent=this.value;updateSchoolPreview()"/>
-                        <span class="rv">8</span>
+                        <input type="range" id="periodsPerDay" min="4" max="12" value="6" oninput="this.nextElementSibling.textContent=this.value;updateSchoolPreview()"/>
+                        <span class="rv">6</span>
                       </div>
                     </div>
                     <div class="field" style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--s3);border-radius:var(--r-sm);border:1px dashed var(--border2)">
