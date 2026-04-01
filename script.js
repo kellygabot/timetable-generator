@@ -25,6 +25,7 @@ const state = {
     noTeacherConflict: true,
     allPeriodsPlaced: true,
     noBackToBack: true,
+    sameGradeSubjectAcrossSections: true,
     maxConsec: true,
     balance: true,
     morningCore: true,
@@ -1161,6 +1162,11 @@ const HARD_CONSTRAINTS = [
     desc: "Same subject cannot appear in consecutive periods within a class",
   },
   {
+    id: "sameGradeSubjectAcrossSections",
+    name: "Same Subject Across Grade Sections",
+    desc: "Each grade should teach the same subject in the same period across all sections",
+  },
+  {
     id: "noRoomConflict",
     name: "No Room Conflicts",
     desc: "Two different classes cannot occupy the same room in the same period",
@@ -1472,6 +1478,44 @@ function fitnessMS(ms) {
         }
       }
   });
+
+  if (state.constraints.sameGradeSubjectAcrossSections) {
+    const gradeGroups = {};
+    classes.forEach(({ grade: g, section: s }) => {
+      const key = g.label || "grade";
+      if (!gradeGroups[key]) gradeGroups[key] = [];
+      gradeGroups[key].push({ g, s });
+    });
+    Object.values(gradeGroups).forEach((group) => {
+      if (group.length < 2) return;
+      const g = group[0].g;
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          let refKey = null;
+          let mismatch = false;
+          let seen = false;
+          for (const { section: s } of group) {
+            const sch = ms[s.id];
+            if (!sch) continue;
+            const si = sch[d][p];
+            const sub = si !== null && si !== undefined ? s.subjects[si] : null;
+            const subjectKey = sub
+              ? (sub.code || sub.name || "").toString().trim().toLowerCase()
+              : null;
+            if (!seen) {
+              refKey = subjectKey;
+              seen = true;
+            } else if (subjectKey !== refKey) {
+              mismatch = true;
+              break;
+            }
+          }
+          if (seen && mismatch) score -= HW;
+        }
+      }
+    });
+  }
 
   // Teacher availability soft penalty
   classes.forEach(({ grade: g, section: s }) => {
@@ -2258,6 +2302,43 @@ function countHardViolations(ms) {
         for (let p = 0; p < periodsPerDay - 1; p++)
           if (sch[d][p] !== null && sch[d][p] === sch[d][p + 1]) v++;
     });
+  if (state.constraints.sameGradeSubjectAcrossSections) {
+    const gradeGroups = {};
+    classes.forEach(({ grade: g, section: s }) => {
+      const key = g.label || "grade";
+      if (!gradeGroups[key]) gradeGroups[key] = [];
+      gradeGroups[key].push({ g, s });
+    });
+    Object.values(gradeGroups).forEach((group) => {
+      if (group.length < 2) return;
+      const g = group[0].g;
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          let refKey = null;
+          let mismatch = false;
+          let seen = false;
+          for (const { section: s } of group) {
+            const sch = ms[s.id];
+            if (!sch) continue;
+            const si = sch[d][p];
+            const sub = si !== null && si !== undefined ? s.subjects[si] : null;
+            const subjectKey = sub
+              ? (sub.code || sub.name || "").toString().trim().toLowerCase()
+              : null;
+            if (!seen) {
+              refKey = subjectKey;
+              seen = true;
+            } else if (subjectKey !== refKey) {
+              mismatch = true;
+              break;
+            }
+          }
+          if (seen && mismatch) v++;
+        }
+      }
+    });
+  }
   return v;
 }
 
