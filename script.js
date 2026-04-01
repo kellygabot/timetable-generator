@@ -9,14 +9,18 @@ const state = {
     numDays: 5,
     periodsPerDay: 8,
     startTime: "07:00",
+    endTime: "15:15",
+    dayEndTimes: ["15:15", "15:15", "14:15", "15:15", "15:15"],
+    dayPeriods: [8, 8, 8, 8, 8], // per-day period override; null = use global periodsPerDay
     numBreaks: 2,
     breaks: [
       { afterPeriod: 3, duration: 15 },
       { afterPeriod: 6, duration: 50 },
     ],
   },
-  gradeLevels: [], // [{id,level,label,color,breaks:[{afterPeriod,duration}],sections:[{id,name,subjects:[{code,name,periodsPerWeek,durationMinutes,teacherId,color}]}]}]
-  teachers: [], // [{id,name,dept,maxPeriods}]
+  gradeLevels: [],
+  teachers: [],
+  rooms: [], // [{id, name, capacity, type}]
   constraints: {
     noTeacherConflict: true,
     allPeriodsPlaced: true,
@@ -26,16 +30,18 @@ const state = {
     morningCore: true,
     afternoonPE: true,
     minTeacherIdle: true,
+    noRoomConflict: true,
   },
   results: null,
   currentAlgo: "ga",
   fitnessHistory: [],
-  frozen: {}, // {classId: {'d_p': true}} — frozen slots
+  frozen: {},
 };
 let selectedClassId = null;
 let resultViewClass = null;
 let dayViewMode = "week";
 let resultViewDay = 0;
+let editingSubjectIdx = null; // null = adding new, number = editing index
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 const DAYS_S = ["MON", "TUE", "WED", "THU", "FRI"];
 const GRADE_COLORS = {
@@ -97,17 +103,201 @@ document.getElementById("numBreaks").addEventListener("input", renderBreaks);
 document
   .getElementById("periodsPerDay")
   .addEventListener("input", updateSchoolPreview);
-document
-  .getElementById("numDays")
-  .addEventListener("change", updateSchoolPreview);
-document
-  .getElementById("startTime")
-  .addEventListener("change", updateSchoolPreview);
+document.getElementById("numDays").addEventListener("change", () => {
+  updateSchoolPreview();
+  renderDayEndTimes();
+});
+document.getElementById("startTime").addEventListener("change", () => {
+  updateSchoolPreview();
+  renderDayEndTimes();
+});
+document.getElementById("endTime") &&
+  document.getElementById("endTime").addEventListener("change", function () {
+    state.school.endTime = this.value;
+    // Apply to all days that haven't been customized
+    for (let i = 0; i < state.school.numDays; i++) {
+      if (
+        !state.school.dayEndTimes[i] ||
+        state.school.dayEndTimes[i] === state.school.endTime
+      ) {
+        state.school.dayEndTimes[i] = this.value;
+      }
+    }
+    renderDayEndTimes();
+    updateSchoolPreview();
+  });
 
+// ── DAY END TIMES ──
+function renderDayEndTimes() {
+  const el = document.getElementById("day-end-config");
+  if (!el) return;
+  const { numDays, dayEndTimes, dayPeriods, startTime, periodsPerDay } =
+    state.school;
+  let html = `<div style="display:grid;grid-template-columns:90px 140px 120px 1fr;gap:8px;align-items:center;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+    <div style="font-size:9px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:1px">Day</div>
+    <div style="font-size:9px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:1px">End Time</div>
+    <div style="font-size:9px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:1px">Periods</div>
+    <div style="font-size:9px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:1px">Info</div>
+  </div>`;
+  for (let i = 0; i < numDays; i++) {
+    const endVal =
+      (dayEndTimes && dayEndTimes[i]) || state.school.endTime || "15:15";
+    const perDay =
+      dayPeriods && dayPeriods[i] != null ? dayPeriods[i] : periodsPerDay;
+    const startMin = t2m(startTime || "07:00");
+    const endMin = t2m(endVal);
+    const totalMin = endMin - startMin;
+    const hrs = Math.floor(totalMin / 60),
+      rem = totalMin % 60;
+    const isCustomPeriods =
+      dayPeriods && dayPeriods[i] != null && dayPeriods[i] !== periodsPerDay;
+    html += `<div style="display:grid;grid-template-columns:90px 140px 120px 1fr;gap:8px;align-items:center;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:600;color:${isCustomPeriods ? "var(--accent-y)" : "var(--text2)"};font-family:var(--mono)">${DAYS[i]}</div>
+      <input type="time" value="${endVal}" oninput="updateDayEndTime(${i},this.value)" style="width:100%">
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="number" min="1" max="16" value="${perDay}"
+          oninput="updateDayPeriods(${i},this.value)"
+          style="width:64px;padding:8px 6px;font-family:var(--mono);font-size:13px;font-weight:700;color:${isCustomPeriods ? "var(--accent-y)" : "var(--text)"}">
+        <span style="font-size:10px;color:var(--text3)">periods</span>
+      </div>
+      <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">${hrs}h ${rem}m${isCustomPeriods ? ' · <span style="color:var(--accent-y)">custom</span>' : ""}</span>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function updateDayEndTime(dayIdx, val) {
+  if (!state.school.dayEndTimes) state.school.dayEndTimes = [];
+  state.school.dayEndTimes[dayIdx] = val;
+  updateSchoolPreview();
+  renderDayEndTimes();
+}
+
+function updateDayPeriods(dayIdx, val) {
+  if (!state.school.dayPeriods) state.school.dayPeriods = [];
+  const n = parseInt(val);
+  state.school.dayPeriods[dayIdx] =
+    isNaN(n) || n <= 0 ? state.school.periodsPerDay : n;
+  updateSchoolPreview();
+  renderDayEndTimes();
+}
+
+function getPeriodsForDay(d, grade) {
+  // 1. Check explicit per-day period override
+  const dp = state.school.dayPeriods;
+  if (dp && dp[d] != null && dp[d] > 0) return dp[d];
+
+  // 2. Fall back to computing from end time
+  const dayEndTimes = state.school.dayEndTimes || [];
+  const endTime = dayEndTimes[d] || state.school.endTime || "15:15";
+  const startMin = t2m(state.school.startTime || "07:00");
+  const endMin = t2m(endTime);
+  const breaks = grade && grade.breaks ? grade.breaks : state.school.breaks;
+  const periodsPerDay = state.school.periodsPerDay;
+  let clock = startMin;
+  let periods = 0;
+  for (let p = 0; p < periodsPerDay; p++) {
+    const dur = 50;
+    if (clock + dur > endMin) break;
+    periods++;
+    clock += dur;
+    const brk = breaks.find((b) => b.afterPeriod === p + 1);
+    if (brk) clock += brk.duration;
+  }
+  return Math.max(1, Math.min(periodsPerDay, periods));
+}
+
+// ── ROOMS MANAGEMENT ──
+function renderRoomManager() {
+  const el = document.getElementById("room-manager");
+  if (!el) return;
+  if (state.rooms.length === 0) {
+    el.innerHTML =
+      '<div style="color:var(--text3);font-size:13px;padding:8px 0">No rooms defined. Add rooms below or they will be auto-generated during import.</div>';
+  } else {
+    el.innerHTML = `<table class="data-table" style="margin-bottom:12px"><thead><tr><th>ID</th><th>Name / Number</th><th>Capacity</th><th>Type</th><th></th></tr></thead><tbody>
+      ${state.rooms
+        .map(
+          (r) => `<tr>
+        <td><span style="font-family:var(--mono);font-size:12px;color:var(--accent)">${r.id}</span></td>
+        <td style="font-weight:500">${r.name}</td>
+        <td style="font-family:var(--mono)">${r.capacity || "—"}</td>
+        <td><span class="chip chip-blue" style="font-size:9px">${r.type || "Classroom"}</span></td>
+        <td><button class="btn btn-danger btn-sm" onclick="removeRoom('${r.id}')">✕</button></td>
+      </tr>`,
+        )
+        .join("")}
+    </tbody></table>`;
+  }
+}
+
+function addRoom() {
+  const id = document.getElementById("rm-id").value.trim();
+  const name = document.getElementById("rm-name").value.trim();
+  const cap = parseInt(document.getElementById("rm-cap").value) || 40;
+  const type = document.getElementById("rm-type").value;
+  if (!id || !name) {
+    alert("Room ID and Name are required.");
+    return;
+  }
+  if (state.rooms.find((r) => r.id === id)) {
+    alert("Room ID already exists.");
+    return;
+  }
+  state.rooms.push({ id, name, capacity: cap, type });
+  ["rm-id", "rm-name"].forEach((i) => (document.getElementById(i).value = ""));
+  document.getElementById("rm-cap").value = 40;
+  renderRoomManager();
+  updateTopChips();
+}
+
+function removeRoom(id) {
+  state.rooms = state.rooms.filter((r) => r.id !== id);
+  // Clear assignments
+  state.gradeLevels.forEach((g) =>
+    g.sections.forEach((s) => {
+      if (s.roomId === id) s.roomId = null;
+      s.subjects.forEach((sub) => {
+        if (sub.roomId === id) sub.roomId = null;
+      });
+    }),
+  );
+  renderRoomManager();
+}
+
+function autoAssignRooms() {
+  if (state.rooms.length === 0) {
+    alert("Add rooms first.");
+    return;
+  }
+  const classes = getAllClasses();
+  const used = new Set(classes.map((c) => c.section.roomId).filter(Boolean));
+  classes.forEach(({ section: s }) => {
+    if (!s.roomId) {
+      const available = state.rooms.find((r) => !used.has(r.id));
+      if (available) {
+        s.roomId = available.id;
+        used.add(available.id);
+      }
+    }
+  });
+  renderClassPicker();
+  if (selectedClassId) renderClassEditor();
+  alert("Rooms auto-assigned to sections without a room.");
+}
+
+function roomName(rid) {
+  if (!rid) return "";
+  const r = state.rooms.find((r) => r.id === rid);
+  return r ? `${r.name}` : rid;
+}
+
+// ═══════════════════════════════════════════════════════
+// SCHOOL PREVIEW
+// ═══════════════════════════════════════════════════════
 function renderBreaks() {
   const n = parseInt(document.getElementById("numBreaks").value);
   state.school.numBreaks = n;
-  // Ensure breaks array has right length
   while (state.school.breaks.length < n)
     state.school.breaks.push({
       afterPeriod: state.school.breaks.length + 1,
@@ -144,7 +334,6 @@ function syncBreaks() {
     afterPeriod: parseInt(p.value) || 1,
     duration: parseInt(ds[i]?.value) || 15,
   }));
-  // Sync template to all grade levels that still have default breaks
   state.gradeLevels.forEach((g) => {
     if (!g._customBreaks) g.breaks = state.school.breaks.map((b) => ({ ...b }));
   });
@@ -157,9 +346,19 @@ function updateSchoolPreview() {
   );
   state.school.startTime =
     document.getElementById("startTime").value || "07:00";
+  const endEl = document.getElementById("endTime");
+  if (endEl) state.school.endTime = endEl.value || "15:15";
+
+  // Keep per-day arrays at the right length
+  const nd = state.school.numDays;
+  if (!state.school.dayEndTimes) state.school.dayEndTimes = [];
+  if (!state.school.dayPeriods) state.school.dayPeriods = [];
+  while (state.school.dayEndTimes.length < nd)
+    state.school.dayEndTimes.push(state.school.endTime || "15:15");
+  while (state.school.dayPeriods.length < nd)
+    state.school.dayPeriods.push(state.school.periodsPerDay);
 
   const d = state.school;
-  const totalBreakMins = d.breaks.reduce((a, b) => a + b.duration, 0);
   const sl = d.numDays * d.periodsPerDay;
   const totalClasses = state.gradeLevels.reduce(
     (a, g) => a + g.sections.length,
@@ -170,14 +369,16 @@ function updateSchoolPreview() {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
       ${kv("Days", DAYS.slice(0, d.numDays).join(", "))}
       ${kv("Periods / Day", d.periodsPerDay)}
-      ${kv("Subject Duration", "Set per subject")}
+      ${kv("Start Time", d.startTime)}
+      ${kv("Default End", d.endTime || "15:15")}
       ${kv("Breaks / Day", d.breaks.length + " · " + d.breaks.map((b, i) => `Break ${i + 1}: ${b.duration}min`).join(", "))}
       ${kv("Slots / Week", sl)}
-      ${kv("Start Time", d.startTime)}
       ${kv("Grade Levels", state.gradeLevels.length)}
       ${kv("Total Classes", totalClasses)}
+      ${kv("Rooms Defined", state.rooms.length)}
     </div>`;
   updateTopChips();
+  renderDayEndTimes();
 }
 
 function kv(k, v) {
@@ -193,7 +394,9 @@ function updateTopChips() {
   document.getElementById("nb-classes").textContent = tc;
 }
 
-// Grade level UI
+// ═══════════════════════════════════════════════════════
+// GRADE LEVEL MANAGER
+// ═══════════════════════════════════════════════════════
 function renderGradeLevelManager() {
   const el = document.getElementById("grade-level-manager");
   if (state.gradeLevels.length === 0) {
@@ -203,20 +406,22 @@ function renderGradeLevelManager() {
     el.innerHTML = state.gradeLevels
       .map((g) => {
         const breaks = g.breaks || [];
+        const shsBadge = g.isSHS
+          ? `<span class="chip chip-red" style="font-size:9px;padding:2px 6px">SHS</span>`
+          : "";
         return `
       <div style="padding:10px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:${breaks.length ? "10px" : "0"}">
           <div style="width:8px;height:8px;border-radius:50%;background:${g.color};flex-shrink:0"></div>
-          <div style="flex:1;font-size:13px;font-weight:500">${g.label}</div>
+          <div style="flex:1;font-size:13px;font-weight:500">${g.label} ${shsBadge}</div>
           <div style="font-size:12px;color:var(--text2)">${g.sections.length} section${g.sections.length !== 1 ? "s" : ""}</div>
           <button class="btn btn-secondary btn-sm" onclick="editGradeBreaks('${g.id}')">⏱ Breaks</button>
           <button class="btn btn-danger btn-sm" onclick="removeGrade('${g.id}')">✕</button>
         </div>
+        ${g.isSHS ? `<div style="font-size:11px;color:var(--accent-p);padding:4px 0;font-family:var(--mono)">🎓 SHS Block Section Mode — subjects have dedicated rooms, students travel between rooms</div>` : ""}
         <div id="grade-breaks-${g.id}" style="display:none" class="grade-break-panel">
           <div class="grade-break-title">Break Schedule — ${g.label}</div>
-          <div id="grade-breaks-rows-${g.id}">
-            ${renderGradeBreakRows(g)}
-          </div>
+          <div id="grade-breaks-rows-${g.id}">${renderGradeBreakRows(g)}</div>
           <div style="margin-top:8px;display:flex;gap:8px">
             <button class="btn btn-secondary btn-sm" onclick="addGradeBreak('${g.id}')">+ Break</button>
             <button class="btn btn-danger btn-sm" onclick="removeLastGradeBreak('${g.id}')">− Remove</button>
@@ -259,22 +464,19 @@ function editGradeBreaks(gid) {
   const panel = document.getElementById("grade-breaks-" + gid);
   panel.style.display = panel.style.display === "none" ? "block" : "none";
 }
-
 function updateGradeBreak(gid, idx, field, val) {
   const g = state.gradeLevels.find((g) => g.id === gid);
   if (!g || !g.breaks[idx]) return;
   g.breaks[idx][field] = parseInt(val) || 0;
   g._customBreaks = true;
 }
-
 function addGradeBreak(gid) {
   const g = state.gradeLevels.find((g) => g.id === gid);
   if (!g) return;
-  const periods = state.school.periodsPerDay;
   g.breaks = g.breaks || [];
   g.breaks.push({
     afterPeriod: Math.min(
-      periods - 1,
+      state.school.periodsPerDay - 1,
       (g.breaks[g.breaks.length - 1]?.afterPeriod || 3) + 2,
     ),
     duration: 15,
@@ -283,7 +485,6 @@ function addGradeBreak(gid) {
   document.getElementById("grade-breaks-rows-" + gid).innerHTML =
     renderGradeBreakRows(g);
 }
-
 function removeLastGradeBreak(gid) {
   const g = state.gradeLevels.find((g) => g.id === gid);
   if (!g || !g.breaks.length) return;
@@ -292,16 +493,14 @@ function removeLastGradeBreak(gid) {
   document.getElementById("grade-breaks-rows-" + gid).innerHTML =
     renderGradeBreakRows(g);
 }
-
 function renderGradeChips() {
   document.getElementById("grade-chips").innerHTML = state.gradeLevels
     .map(
       (g) =>
-        `<span class="chip" style="background:${g.color}22;color:${g.color};border:1px solid ${g.color}44">${g.label}</span>`,
+        `<span class="chip" style="background:${g.color}22;color:${g.color};border:1px solid ${g.color}44">${g.label}${g.isSHS ? " SHS" : ""}</span>`,
     )
     .join("");
 }
-
 function addGradeModal() {
   document.getElementById("gradeModal").classList.add("open");
 }
@@ -312,11 +511,16 @@ document.getElementById("gm-naming").addEventListener("change", function () {
   document.getElementById("gm-prefix-field").style.display =
     this.value === "custom" ? "block" : "none";
 });
+document.getElementById("gm-level") &&
+  document.getElementById("gm-level").addEventListener("change", function () {
+    const level = parseInt(this.value);
+    const shsRow = document.getElementById("gm-shs-row");
+    if (shsRow) shsRow.style.display = level >= 11 ? "block" : "none";
+  });
 
 function confirmAddGrade() {
   const level = parseInt(document.getElementById("gm-level").value);
-  const existing = state.gradeLevels.find((g) => g.level === level);
-  if (existing) {
+  if (state.gradeLevels.find((g) => g.level === level)) {
     alert("Grade " + level + " already exists.");
     return;
   }
@@ -324,6 +528,8 @@ function confirmAddGrade() {
     parseInt(document.getElementById("gm-sections").value) || 1;
   const naming = document.getElementById("gm-naming").value;
   const prefix = document.getElementById("gm-prefix").value.trim();
+  const isSHSEl = document.getElementById("gm-shs");
+  const isSHS = isSHSEl ? isSHSEl.checked : level >= 11;
   const sections = [];
   for (let i = 0; i < numSections; i++) {
     let name;
@@ -344,10 +550,10 @@ function confirmAddGrade() {
       id: "g" + level + "s" + i + "_" + Date.now(),
       name,
       subjects: [],
+      roomId: null,
     });
   }
   const color = GRADE_COLORS[level] || "#888";
-  // Copy global break template for this grade
   const gradeBreaks = state.school.breaks.map((b) => ({ ...b }));
   state.gradeLevels.push({
     id: "g" + level,
@@ -357,12 +563,12 @@ function confirmAddGrade() {
     breaks: gradeBreaks,
     _customBreaks: false,
     sections,
+    isSHS,
   });
   state.gradeLevels.sort((a, b) => a.level - b.level);
   closeModal("gradeModal");
   renderGradeLevelManager();
 }
-
 function removeGrade(id) {
   if (!confirm("Remove this grade level and all its sections?")) return;
   state.gradeLevels = state.gradeLevels.filter((g) => g.id !== id);
@@ -383,7 +589,12 @@ function confirmAddSection() {
   if (!name) return;
   const g = state.gradeLevels.find((g) => g.id === gid);
   if (!g) return;
-  g.sections.push({ id: "sect_" + Date.now(), name, subjects: [] });
+  g.sections.push({
+    id: "sect_" + Date.now(),
+    name,
+    subjects: [],
+    roomId: null,
+  });
   closeModal("sectionModal");
   renderGradeLevelManager();
 }
@@ -413,7 +624,6 @@ function addTeacher() {
   drawTeacherLoadChart();
   updateTopChips();
 }
-
 function removeTeacher(id) {
   state.teachers = state.teachers.filter((t) => t.id !== id);
   renderTeacherTable();
@@ -440,7 +650,6 @@ function openAvailModal(tid) {
   renderAvailBlocks();
   document.getElementById("availModal").classList.add("open");
 }
-
 function renderAvailBlocks() {
   const container = document.getElementById("availBlocks");
   const empty = document.getElementById("availEmpty");
@@ -455,34 +664,21 @@ function renderAvailBlocks() {
     .map(
       (b, i) => `
     <div class="avail-block">
-      <div>
-        <label>Type</label>
+      <div><label>Type</label>
         <select onchange="pendingBlocks[${i}].type=this.value" style="width:100%">
           <option value="unavailable" ${b.type === "unavailable" ? "selected" : ""}>🚫 Not available</option>
           <option value="preferred_off" ${b.type === "preferred_off" ? "selected" : ""}>😓 Prefers not to teach</option>
-        </select>
-      </div>
-      <div>
-        <label>From</label>
-        <input type="time" value="${b.fromTime}" onchange="pendingBlocks[${i}].fromTime=this.value" style="width:100%">
-      </div>
-      <div>
-        <label>To</label>
-        <input type="time" value="${b.toTime}" onchange="pendingBlocks[${i}].toTime=this.value" style="width:100%">
-      </div>
-      <div style="align-self:end">
-        <button class="btn btn-danger btn-sm" onclick="removeAvailBlock(${i})">✕</button>
-      </div>
-      <div style="grid-column:1/-1">
-        <label>Days</label>
+        </select></div>
+      <div><label>From</label><input type="time" value="${b.fromTime}" onchange="pendingBlocks[${i}].fromTime=this.value" style="width:100%"></div>
+      <div><label>To</label><input type="time" value="${b.toTime}" onchange="pendingBlocks[${i}].toTime=this.value" style="width:100%"></div>
+      <div style="align-self:end"><button class="btn btn-danger btn-sm" onclick="removeAvailBlock(${i})">✕</button></div>
+      <div style="grid-column:1/-1"><label>Days</label>
         <div class="day-check-row">
           ${dayNames
             .map(
               (d, di) => `
-            <input type="checkbox" class="day-check" id="dc_${i}_${di}" ${b.days.includes(di) ? "checked" : ""}
-              onchange="toggleDay(${i},${di},this.checked)">
-            <label for="dc_${i}_${di}">${d}</label>
-          `,
+            <input type="checkbox" class="day-check" id="dc_${i}_${di}" ${b.days.includes(di) ? "checked" : ""} onchange="toggleDay(${i},${di},this.checked)">
+            <label for="dc_${i}_${di}">${d}</label>`,
             )
             .join("")}
         </div>
@@ -491,7 +687,6 @@ function renderAvailBlocks() {
     )
     .join("");
 }
-
 function addAvailBlock() {
   pendingBlocks.push({
     type: "unavailable",
@@ -501,25 +696,19 @@ function addAvailBlock() {
   });
   renderAvailBlocks();
 }
-
 function removeAvailBlock(i) {
   pendingBlocks.splice(i, 1);
   renderAvailBlocks();
 }
-
 function toggleDay(blockIdx, dayIdx, checked) {
   const b = pendingBlocks[blockIdx];
   if (checked) {
     if (!b.days.includes(dayIdx)) b.days.push(dayIdx);
-  } else {
-    b.days = b.days.filter((d) => d !== dayIdx);
-  }
+  } else b.days = b.days.filter((d) => d !== dayIdx);
 }
-
 function saveAvailability() {
   const t = state.teachers.find((t) => t.id === editingTeacherId);
   if (!t) return;
-  // Validate: toTime must be after fromTime
   for (const b of pendingBlocks) {
     if (t2m(b.toTime) <= t2m(b.fromTime)) {
       alert(`Block invalid: "To" time must be after "From" time.`);
@@ -540,7 +729,7 @@ function getTeacherLoad(tid) {
   state.gradeLevels.forEach((g) =>
     g.sections.forEach((s) =>
       s.subjects.forEach((sub) => {
-        if (sub.teacherId === tid) total += sub.periodsPerWeek;
+        if (getTeacherIds(sub).includes(tid)) total += sub.periodsPerWeek;
       }),
     ),
   );
@@ -594,7 +783,6 @@ function formatAvailBlock(b) {
       : "Every day";
   return `${b.type === "unavailable" ? "Unavailable" : "Preferred off"}: ${dayStr} ${b.fromTime}–${b.toTime}`;
 }
-
 function formatAvailBlockShort(b) {
   const dayStr =
     b.days && b.days.length < 5
@@ -674,15 +862,17 @@ function renderClassPicker() {
     .map(
       (g) => `
     <div class="cp-grade">
-      <div class="cp-grade-label"><div class="gdot" style="background:${g.color}"></div>${g.label}</div>
+      <div class="cp-grade-label"><div class="gdot" style="background:${g.color}"></div>${g.label}${g.isSHS ? ' <span style="font-size:9px;color:var(--accent-r);margin-left:4px">SHS</span>' : ""}</div>
       ${g.sections
-        .map(
-          (s) => `
-        <div class="cp-section ${selectedClassId === s.id ? "active" : ""}" onclick="selectClass('${s.id}')">
-          <span>${s.name}</span>
+        .map((s) => {
+          const room = s.roomId
+            ? state.rooms.find((r) => r.id === s.roomId)
+            : null;
+          return `<div class="cp-section ${selectedClassId === s.id ? "active" : ""}" onclick="selectClass('${s.id}')">
+          <span>${s.name}${room ? ` <span style="font-size:10px;color:var(--text3);font-family:var(--mono)">[${room.name}]</span>` : ""}</span>
           <span class="sbadge" style="color:${g.color}">${s.subjects.length}</span>
-        </div>`,
-        )
+        </div>`;
+        })
         .join("")}
     </div>`,
     )
@@ -691,6 +881,7 @@ function renderClassPicker() {
 
 function selectClass(id) {
   selectedClassId = id;
+  editingSubjectIdx = null;
   renderClassPicker();
   renderClassEditor();
 }
@@ -713,29 +904,69 @@ function renderClassEditor() {
   if (!found) return;
   const { grade: g, section: s } = found;
 
+  const roomOptions = `<option value="">— No Room —</option>
+    ${state.rooms.map((r) => `<option value="${r.id}" ${s.roomId === r.id ? "selected" : ""}>${r.name} (${r.id})</option>`).join("")}`;
+
+  const isEditing = editingSubjectIdx !== null;
+  const editSub = isEditing ? s.subjects[editingSubjectIdx] : null;
+  const editTeacherIds = isEditing ? getTeacherIds(editSub) : [];
+
   el.innerHTML = `
     <div class="card fade-up">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
         <div>
-          <div style="font-family:var(--head);font-size:16px;font-weight:700">${g.label} — ${s.name}</div>
+          <div style="font-family:var(--head);font-size:16px;font-weight:700">${g.label} — ${s.name}${g.isSHS ? ' <span style="font-size:11px;color:var(--accent-r)">SHS Block</span>' : ""}</div>
           <div style="font-size:12px;color:var(--text2);margin-top:2px">${s.subjects.length} subjects · ${s.subjects.reduce((a, b) => a + b.periodsPerWeek, 0)} periods/week</div>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="copySubjectsModal()">⎘ Copy from…</button>
-      </div>
-      <div class="card-title">Add Subject</div>
-      <div class="g2" style="margin-bottom:10px">
-        <div class="field"><label>Subject Code</label><input type="text" id="e-code" placeholder="e.g. MATH10" style="text-transform:uppercase"></div>
-        <div class="field"><label>Subject Name</label><input type="text" id="e-name" placeholder="e.g. Algebra I"></div>
-        <div class="field"><label>Sessions / Week</label><input type="number" id="e-pw" min="1" max="10" value="5"></div>
-        <div class="field"><label>Duration per Session (min)</label><input type="number" id="e-dur" min="15" max="180" value="50" placeholder="50"></div>
-        <div class="field"><label>Assign Teacher</label>
-          <select id="e-teacher">
-            <option value="">— Select Teacher —</option>
-            ${state.teachers.map((t) => `<option value="${t.id}">${t.name} (${t.id})</option>`).join("")}
-          </select>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary btn-sm" onclick="copySubjectsModal()">⎘ Copy from…</button>
         </div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="addSubjectToClass()">+ Add Subject</button>
+
+      ${
+        state.rooms.length > 0
+          ? `
+      <div class="field" style="margin-bottom:16px">
+        <label>Home Room (for this section)</label>
+        <select onchange="setSectionRoom('${s.id}',this.value)">${roomOptions}</select>
+      </div>`
+          : `<div style="font-size:11px;color:var(--text3);margin-bottom:12px;padding:8px 10px;background:var(--s3);border-radius:var(--r-sm);border-left:2px solid var(--border2)">
+        💡 Add rooms in School Setup → Rooms to enable room assignment
+      </div>`
+      }
+
+      <div class="card-title">${isEditing ? `✏ Editing: ${editSub.name}` : "Add Subject"}</div>
+      <div class="g2" style="margin-bottom:10px">
+        <div class="field"><label>Subject Code</label><input type="text" id="e-code" placeholder="e.g. MATH10" style="text-transform:uppercase" value="${isEditing ? editSub.code : ""}"></div>
+        <div class="field"><label>Subject Name</label><input type="text" id="e-name" placeholder="e.g. Algebra I" value="${isEditing ? editSub.name : ""}"></div>
+        <div class="field"><label>Sessions / Week</label><input type="number" id="e-pw" min="1" max="10" value="${isEditing ? editSub.periodsPerWeek : 5}"></div>
+        <div class="field"><label>Duration per Session (min)</label><input type="number" id="e-dur" min="15" max="180" value="${isEditing ? editSub.durationMinutes || 50 : 50}"></div>
+        <div class="field" style="grid-column:1/-1">
+          <label style="display:flex;align-items:center;gap:8px">
+            Assign Teachers
+            <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">Hold Ctrl / Cmd to select multiple. Each teacher is credited the full session load.</span>
+          </label>
+          <select id="e-teacher" multiple style="height:${Math.max(80, Math.min(160, state.teachers.length * 28))}px;border-radius:var(--r-sm)">
+            ${state.teachers.map((t) => `<option value="${t.id}" ${editTeacherIds.includes(t.id) ? "selected" : ""}>${t.name} (${t.id}) — ${t.dept || "no dept"}</option>`).join("")}
+          </select>
+          ${state.teachers.length === 0 ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">Add teachers first in the Teachers panel.</div>` : ""}
+        </div>
+        ${
+          state.rooms.length > 0
+            ? `
+        <div class="field"><label>${g.isSHS ? "Subject Room (SHS — fixed per subject)" : "Subject Room (optional)"}</label>
+          <select id="e-room">
+            <option value="">— Use Section Room —</option>
+            ${state.rooms.map((r) => `<option value="${r.id}" ${isEditing && editSub.roomId === r.id ? "selected" : ""}>${r.name} (${r.id})</option>`).join("")}
+          </select>
+        </div>`
+            : ""
+        }
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="addSubjectToClass()">${isEditing ? "✓ Update Subject" : "+ Add Subject"}</button>
+        ${isEditing ? `<button class="btn btn-secondary btn-sm" onclick="cancelSubjectEdit()">Cancel</button>` : ""}
+      </div>
     </div>
 
     <div class="card fade-up" style="animation-delay:.05s">
@@ -745,26 +976,69 @@ function renderClassEditor() {
           s.subjects.length === 0
             ? '<div style="color:var(--text3);font-size:13px;padding:8px 0">No subjects added yet</div>'
             : s.subjects
-                .map(
-                  (sub, i) => `
-            <div class="subj-pill fade-up">
-              <span class="subj-code sc${sub.color % 10}" style="padding:3px 8px;border-radius:4px">${sub.code}</span>
-              <span class="subj-name">${sub.name}</span>
-              <span class="subj-meta">${sub.periodsPerWeek}×/wk</span>
-              <span class="subj-meta">${sub.durationMinutes || 50}min</span>
-              <span class="subj-meta">${teacherName(sub.teacherId)}</span>
-              <button class="btn btn-danger" onclick="removeSubjectFromClass(${i})">✕</button>
-            </div>`,
-                )
+                .map((sub, i) => {
+                  const subRoom = sub.roomId
+                    ? state.rooms.find((r) => r.id === sub.roomId)
+                    : null;
+                  const tids = getTeacherIds(sub);
+                  return `<div class="subj-pill fade-up ${editingSubjectIdx === i ? "subj-editing" : ""}">
+                <span class="subj-code sc${sub.color % 10}" style="padding:3px 8px;border-radius:4px">${sub.code}</span>
+                <span class="subj-name">${sub.name}</span>
+                <span class="subj-meta">${sub.periodsPerWeek}×/wk</span>
+                <span class="subj-meta">${sub.durationMinutes || 50}min</span>
+                <span class="subj-meta" style="${tids.length > 1 ? "color:var(--accent-y)" : ""}">${tids.length > 1 ? "👥 " : ""}${teacherNames(sub)}</span>
+                ${subRoom ? `<span class="subj-meta" style="color:var(--accent-p)">📍${subRoom.name}</span>` : ""}
+                <button class="btn btn-ghost btn-sm" onclick="editSubjectFromClass(${i})" title="Edit subject">✏</button>
+                <button class="btn btn-danger" onclick="removeSubjectFromClass(${i})">✕</button>
+              </div>`;
+                })
                 .join("")
         }
       </div>
     </div>`;
 }
 
+function setSectionRoom(sectionId, roomId) {
+  const found = findClass(sectionId);
+  if (!found) return;
+  found.section.roomId = roomId || null;
+  renderClassPicker();
+}
+
+function editSubjectFromClass(idx) {
+  editingSubjectIdx = idx;
+  renderClassEditor();
+  // Scroll to top of editor
+  document.getElementById("classEditor").scrollTop = 0;
+}
+
+function cancelSubjectEdit() {
+  editingSubjectIdx = null;
+  renderClassEditor();
+}
+
+// Returns the teacher IDs array for a subject — handles both old {teacherId} and new {teacherIds}
+function getTeacherIds(sub) {
+  if (!sub) return [];
+  if (Array.isArray(sub.teacherIds)) return sub.teacherIds.filter(Boolean);
+  if (sub.teacherId) return [sub.teacherId];
+  return [];
+}
+
 function teacherName(tid) {
   const t = state.teachers.find((t) => t.id === tid);
   return t ? t.name : tid || "Unassigned";
+}
+
+function teacherNames(sub) {
+  const ids = getTeacherIds(sub);
+  if (!ids.length) return "Unassigned";
+  return ids
+    .map((id) => {
+      const t = state.teachers.find((t) => t.id === id);
+      return t ? t.name : id;
+    })
+    .join(" / ");
 }
 
 function addSubjectToClass() {
@@ -773,7 +1047,17 @@ function addSubjectToClass() {
   const name = document.getElementById("e-name").value.trim();
   const pw = parseInt(document.getElementById("e-pw").value) || 1;
   const dur = parseInt(document.getElementById("e-dur").value) || 50;
-  const tid = document.getElementById("e-teacher").value;
+  const roomEl = document.getElementById("e-room");
+  const roomId = roomEl ? roomEl.value : "";
+
+  // Read multi-select
+  const teacherSel = document.getElementById("e-teacher");
+  const teacherIds = teacherSel
+    ? Array.from(teacherSel.selectedOptions)
+        .map((o) => o.value)
+        .filter(Boolean)
+    : [];
+
   if (!code || !name) {
     alert("Code and name required");
     return;
@@ -781,18 +1065,33 @@ function addSubjectToClass() {
   const found = findClass(selectedClassId);
   if (!found) return;
   const { section: s } = found;
-  if (s.subjects.find((sub) => sub.code === code)) {
-    alert("Subject code already exists in this class");
-    return;
+
+  if (editingSubjectIdx !== null) {
+    const existing = s.subjects[editingSubjectIdx];
+    existing.code = code;
+    existing.name = name;
+    existing.periodsPerWeek = pw;
+    existing.durationMinutes = dur;
+    existing.teacherIds = teacherIds;
+    existing.teacherId = teacherIds[0] || ""; // backward compat
+    existing.roomId = roomId || null;
+    editingSubjectIdx = null;
+  } else {
+    if (s.subjects.find((sub) => sub.code === code)) {
+      alert("Subject code already exists in this class");
+      return;
+    }
+    s.subjects.push({
+      code,
+      name,
+      periodsPerWeek: pw,
+      durationMinutes: dur,
+      teacherIds,
+      teacherId: teacherIds[0] || "", // backward compat
+      roomId: roomId || null,
+      color: colorCounter++ % 10,
+    });
   }
-  s.subjects.push({
-    code,
-    name,
-    periodsPerWeek: pw,
-    durationMinutes: dur,
-    teacherId: tid,
-    color: colorCounter++ % 10,
-  });
   renderClassEditor();
   renderClassPicker();
   renderTeacherTable();
@@ -803,6 +1102,7 @@ function removeSubjectFromClass(idx) {
   const found = findClass(selectedClassId);
   if (!found) return;
   found.section.subjects.splice(idx, 1);
+  if (editingSubjectIdx === idx) editingSubjectIdx = null;
   renderClassEditor();
   renderClassPicker();
   renderTeacherTable();
@@ -824,11 +1124,8 @@ function copySubjectsModal() {
     alert("No other classes with subjects available.");
     return;
   }
-  const sel = choices
-    .map((c) => `<option value="${c.id}">${c.label}</option>`)
-    .join("");
   const from = prompt(
-    "Paste the class ID to copy from (this will overwrite subjects):\n" +
+    "Paste the class ID to copy from:\n" +
       choices.map((c) => c.id + ": " + c.label).join("\n"),
   );
   if (!from) return;
@@ -851,7 +1148,7 @@ const HARD_CONSTRAINTS = [
   {
     id: "noTeacherConflict",
     name: "No Teacher Conflicts",
-    desc: "A teacher cannot be assigned to two classes in the same period (enforced across ALL classes)",
+    desc: "A teacher cannot be assigned to two classes in the same period",
   },
   {
     id: "allPeriodsPlaced",
@@ -862,6 +1159,11 @@ const HARD_CONSTRAINTS = [
     id: "noBackToBack",
     name: "No Back-to-Back Same Subject",
     desc: "Same subject cannot appear in consecutive periods within a class",
+  },
+  {
+    id: "noRoomConflict",
+    name: "No Room Conflicts",
+    desc: "Two different classes cannot occupy the same room in the same period",
   },
 ];
 const SOFT_CONSTRAINTS = [
@@ -928,9 +1230,6 @@ function selAlgo(a) {
 // ═══════════════════════════════════════════════════════
 // SCHEDULE GENERATION
 // ═══════════════════════════════════════════════════════
-// Schedule: dict of classId -> day[][period] -> subjectLocalIndex (index in section.subjects) or null
-// All classes generated simultaneously to respect cross-class teacher conflicts
-
 function getAllClasses() {
   const classes = [];
   state.gradeLevels.forEach((g) =>
@@ -939,16 +1238,19 @@ function getAllClasses() {
   return classes;
 }
 
-// buildTimeSlots: computes actual start/end times for a given day's schedule
-// grade: grade level object (for per-grade breaks)
-// daySchedule: array of subject indices for that day [si|null, ...]
-// subjects: subjects array of the class
-function buildTimeSlots(grade, daySchedule, subjects) {
+function buildTimeSlots(grade, daySchedule, subjects, dayIdx) {
   const { startTime, periodsPerDay } = state.school;
   const breaks = grade && grade.breaks ? grade.breaks : state.school.breaks;
+  const dayEndTime =
+    dayIdx !== undefined &&
+    state.school.dayEndTimes &&
+    state.school.dayEndTimes[dayIdx]
+      ? state.school.dayEndTimes[dayIdx]
+      : state.school.endTime || null;
   const slots = [];
   let time = t2m(startTime);
   const len = daySchedule ? daySchedule.length : periodsPerDay;
+  const endMin = dayEndTime ? t2m(dayEndTime) : Infinity;
 
   for (let p = 0; p < len; p++) {
     const si = daySchedule ? daySchedule[p] : null;
@@ -957,6 +1259,18 @@ function buildTimeSlots(grade, daySchedule, subjects) {
         ? subjects[si]
         : null;
     const dur = sub ? sub.durationMinutes || 50 : 50;
+    if (time + dur > endMin + 5) {
+      // small buffer for rounding
+      slots.push({
+        period: null,
+        start: m2t(time),
+        end: dayEndTime || m2t(time),
+        isBreak: false,
+        isEndOfDay: true,
+        duration: 0,
+      });
+      break;
+    }
     slots.push({
       period: p + 1,
       start: m2t(time),
@@ -966,7 +1280,7 @@ function buildTimeSlots(grade, daySchedule, subjects) {
     });
     time += dur;
     const brk = breaks.find((b) => b.afterPeriod === p + 1);
-    if (brk) {
+    if (brk && time + brk.duration <= endMin + 5) {
       const bLabel = brk.duration >= 30 ? "🍽 LUNCH" : "☕ BREAK";
       slots.push({
         period: null,
@@ -982,7 +1296,6 @@ function buildTimeSlots(grade, daySchedule, subjects) {
   return slots;
 }
 
-// Random schedule: for ALL classes
 // ═══════════════════════════════════════════════════════
 // FREEZE / UNFREEZE
 // ═══════════════════════════════════════════════════════
@@ -998,16 +1311,14 @@ function toggleFreeze(classId, d, p) {
     state.frozen[classId][key] = true;
   }
   updateFreezeUI();
-  renderResultView(); // re-render to show updated freeze state
+  renderResultView();
 }
-
 function countFrozen() {
   let total = 0;
   for (const cid of Object.keys(state.frozen))
     total += Object.keys(state.frozen[cid]).length;
   return total;
 }
-
 function updateFreezeUI() {
   const n = countFrozen();
   const bar = document.getElementById("freeze-bar");
@@ -1025,13 +1336,11 @@ function updateFreezeUI() {
     clearBtn.style.display = "none";
   }
 }
-
 function clearAllFrozen() {
   state.frozen = {};
   updateFreezeUI();
   renderResultView();
 }
-
 function isFrozen(classId, d, p) {
   return !!(state.frozen[classId] && state.frozen[classId][`${d}_${p}`]);
 }
@@ -1040,18 +1349,14 @@ async function rerollUnfrozen() {
   if (!state.results) return;
   const classes = getAllClasses();
   if (classes.length === 0) return;
-
   const btn = document.getElementById("rerollBtn");
   btn.disabled = true;
   btn.textContent = "↻ Rerolling...";
-
   await sleep(20);
-
   let res;
   if (state.currentAlgo === "ga") res = runGA();
   else if (state.currentAlgo === "sa") res = runSA();
   else res = runCP();
-
   const hard = countHardViolations(res.sched);
   const soft = countSoftViolations(res.sched);
   state.results = {
@@ -1061,7 +1366,6 @@ async function rerollUnfrozen() {
     soft,
     elapsed: 0,
   };
-
   document.getElementById("st-fit").textContent = res.fitness.toFixed(0);
   document.getElementById("st-hard").textContent = hard;
   document.getElementById("st-hard").style.color =
@@ -1070,7 +1374,6 @@ async function rerollUnfrozen() {
   updateConflictBadge();
   renderResultView();
   updateFreezeUI();
-
   btn.disabled = false;
   btn.innerHTML =
     '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 3h9a3 3 0 0 1 0 6H4M1 3l3-2M1 3l3 2"/><path d="M13 11H4a3 3 0 0 1 0-6h6M13 11l-3-2M13 11l-3 2"/></svg> Reroll Unfrozen';
@@ -1080,19 +1383,17 @@ function randomMultiSchedule() {
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
   const sched = {};
-  classes.forEach(({ section: s }) => {
-    sched[s.id] = Array.from({ length: numDays }, () =>
+  classes.forEach(({ grade: g, section: s }) => {
+    sched[s.id] = Array.from({ length: numDays }, (_, d) =>
       new Array(periodsPerDay).fill(null),
     );
     const fz = state.frozen[s.id] || {};
-    // Lock frozen cells from existing results
     if (state.results?.sched?.[s.id]) {
       for (const key of Object.keys(fz)) {
         const [d, p] = key.split("_").map(Number);
         sched[s.id][d][p] = state.results.sched[s.id][d][p];
       }
     }
-    // Count what still needs to be placed (excluding frozen)
     const placed = new Array(s.subjects.length).fill(0);
     for (let d = 0; d < numDays; d++)
       for (let p = 0; p < periodsPerDay; p++) {
@@ -1106,10 +1407,12 @@ function randomMultiSchedule() {
     });
     shuffleArr(toPlace);
     let idx = 0;
-    for (let d = 0; d < numDays && idx < toPlace.length; d++)
-      for (let p = 0; p < periodsPerDay && idx < toPlace.length; p++) {
+    for (let d = 0; d < numDays && idx < toPlace.length; d++) {
+      const dayPeriods = getPeriodsForDay(d, g);
+      for (let p = 0; p < dayPeriods && idx < toPlace.length; p++) {
         if (sched[s.id][d][p] === null) sched[s.id][d][p] = toPlace[idx++];
       }
+    }
   });
   return sched;
 }
@@ -1127,7 +1430,7 @@ function fitnessMS(ms) {
   const SW = parseInt(document.getElementById("sw").value) || 15;
   let score = 5000;
 
-  // Build teacher occupation: teacher_id -> day -> period -> [classId]
+  // Build teacher occupation
   const teacherSlots = {};
   state.teachers.forEach((t) => {
     teacherSlots[t.id] = Array.from({ length: numDays }, () =>
@@ -1135,90 +1438,97 @@ function fitnessMS(ms) {
     );
   });
 
+  // Room occupation
+  const roomSlots = {}; // roomId_d_p -> classId
+
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
+    const dayPeriods = Array.from({ length: numDays }, (_, d) =>
+      getPeriodsForDay(d, g),
+    );
     for (let d = 0; d < numDays; d++)
-      for (let p = 0; p < periodsPerDay; p++) {
+      for (let p = 0; p < dayPeriods[d]; p++) {
         const si = sch[d][p];
         if (si === null) continue;
         const sub = s.subjects[si];
         if (!sub) continue;
-        const tid = sub.teacherId;
-        if (!tid) continue;
-        if (!teacherSlots[tid])
-          teacherSlots[tid] = Array.from({ length: numDays }, () =>
-            new Array(periodsPerDay).fill(null),
-          );
-        if (teacherSlots[tid][d][p] !== null)
-          score -= HW; // HARD: teacher conflict
-        else teacherSlots[tid][d][p] = s.id;
+        const tids = getTeacherIds(sub);
+        for (const tid of tids) {
+          if (!teacherSlots[tid])
+            teacherSlots[tid] = Array.from({ length: numDays }, () =>
+              new Array(periodsPerDay).fill(null),
+            );
+          if (teacherSlots[tid][d][p] !== null)
+            score -= HW; // teacher conflict
+          else teacherSlots[tid][d][p] = s.id;
+        }
+        // Room conflict check
+        const rid = sub.roomId || s.roomId;
+        if (rid && state.constraints.noRoomConflict) {
+          const rkey = `${rid}_${d}_${p}`;
+          if (roomSlots[rkey]) score -= HW;
+          else roomSlots[rkey] = s.id;
+        }
       }
   });
 
-  // Soft: teacher availability — penalize periods scheduled during unavailable/preferred-off times
+  // Teacher availability soft penalty
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
-    // Compute period start times for this class's day schedule
     for (let d = 0; d < numDays; d++) {
-      // Build period->startMinute map using the grade's break config
       const breaks = g && g.breaks ? g.breaks : state.school.breaks;
       let clock = t2m(state.school.startTime);
-      const periodStart = [];
-      for (let p = 0; p < periodsPerDay; p++) {
-        periodStart.push(clock);
+      const dayPeriods = getPeriodsForDay(d, g);
+      for (let p = 0; p < dayPeriods; p++) {
         const si = sch[d][p];
         const sub =
           si !== null && si !== undefined && s.subjects[si]
             ? s.subjects[si]
             : null;
-        clock += sub ? sub.durationMinutes || 50 : 50;
-        const brk = breaks.find((b) => b.afterPeriod === p + 1);
-        if (brk) clock += brk.duration;
-      }
-      for (let p = 0; p < periodsPerDay; p++) {
-        const si = sch[d][p];
-        if (si === null) continue;
-        const sub = s.subjects[si];
-        if (!sub?.teacherId) continue;
-        const teacher = state.teachers.find((t) => t.id === sub.teacherId);
-        if (!teacher?.unavailability?.length) continue;
-        const pStart = periodStart[p];
-        const pEnd = pStart + (sub.durationMinutes || 50);
-        for (const block of teacher.unavailability) {
-          if (!block.days.includes(d)) continue;
-          const bFrom = t2m(block.fromTime),
-            bTo = t2m(block.toTime);
-          // Check overlap: period overlaps with block if pStart < bTo && pEnd > bFrom
-          if (pStart < bTo && pEnd > bFrom) {
-            const penalty = block.type === "unavailable" ? SW * 3 : SW;
-            score -= penalty;
+        const dur = sub ? sub.durationMinutes || 50 : 50;
+        if (sub) {
+          const tids = getTeacherIds(sub);
+          for (const tid of tids) {
+            const teacher = state.teachers.find((t) => t.id === tid);
+            if (teacher?.unavailability?.length) {
+              const pEnd = clock + dur;
+              for (const block of teacher.unavailability) {
+                if (!block.days.includes(d)) continue;
+                const bFrom = t2m(block.fromTime),
+                  bTo = t2m(block.toTime);
+                if (clock < bTo && pEnd > bFrom) {
+                  score -= block.type === "unavailable" ? SW * 3 : SW;
+                }
+              }
+            }
           }
         }
+        clock += dur;
+        const brk = breaks.find((b) => b.afterPeriod === p + 1);
+        if (brk) clock += brk.duration;
       }
     }
   });
 
-  classes.forEach(({ section: s }) => {
+  classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
     for (let d = 0; d < numDays; d++) {
+      const dayPeriods = getPeriodsForDay(d, g);
       let consec = 0;
-      for (let p = 0; p < periodsPerDay; p++) {
+      for (let p = 0; p < dayPeriods; p++) {
         const si = sch[d][p];
-        const si2 = p < periodsPerDay - 1 ? sch[d][p + 1] : null;
-        // Hard: back-to-back same
+        const si2 = p < dayPeriods - 1 ? sch[d][p + 1] : null;
         if (state.constraints.noBackToBack && si !== null && si === si2)
           score -= HW;
-        // Soft: max consecutive
         if (state.constraints.maxConsec) {
           if (si !== null) {
             consec++;
             if (consec > 3) score -= SW;
           } else consec = 0;
         }
-        // Soft: morning core
         if (state.constraints.morningCore && p < 3 && si !== null) {
           const n = s.subjects[si]?.name.toLowerCase() || "";
           if (
@@ -1230,10 +1540,9 @@ function fitnessMS(ms) {
           )
             score += SW;
         }
-        // Soft: afternoon PE
         if (
           state.constraints.afternoonPE &&
-          p >= Math.ceil(periodsPerDay * 0.6) &&
+          p >= Math.ceil(dayPeriods * 0.6) &&
           si !== null
         ) {
           const n = s.subjects[si]?.name.toLowerCase() || "";
@@ -1249,27 +1558,29 @@ function fitnessMS(ms) {
         }
       }
     }
-    // Soft: balance
     if (state.constraints.balance) {
       s.subjects.forEach((_, si) => {
         const perDay = Array(numDays).fill(0);
-        for (let d = 0; d < numDays; d++)
-          for (let p = 0; p < periodsPerDay; p++)
+        for (let d = 0; d < numDays; d++) {
+          const dayPeriods = getPeriodsForDay(d, g);
+          for (let p = 0; p < dayPeriods; p++)
             if (sch[d][p] === si) perDay[d]++;
+        }
         const avg = s.subjects[si].periodsPerWeek / numDays;
         score -= perDay.reduce((a, v) => a + Math.abs(v - avg), 0) * SW * 0.5;
       });
     }
   });
 
-  // Check all periods placed
-  classes.forEach(({ section: s }) => {
+  classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
     s.subjects.forEach((sub, si) => {
       let placed = 0;
-      for (let d = 0; d < numDays; d++)
-        for (let p = 0; p < periodsPerDay; p++) if (sch[d][p] === si) placed++;
+      for (let d = 0; d < numDays; d++) {
+        const dayPeriods = getPeriodsForDay(d, g);
+        for (let p = 0; p < dayPeriods; p++) if (sch[d][p] === si) placed++;
+      }
       if (placed < sub.periodsPerWeek)
         score -= HW * (sub.periodsPerWeek - placed);
     });
@@ -1281,36 +1592,35 @@ function fitnessMS(ms) {
 function repairMS(ms) {
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
-  classes.forEach(({ section: s }) => {
+  classes.forEach(({ grade: g, section: s }) => {
     if (!ms[s.id])
       ms[s.id] = Array.from({ length: numDays }, () =>
         new Array(periodsPerDay).fill(null),
       );
     const sch = ms[s.id];
     const fz = state.frozen[s.id] || {};
-    // Count placed
     const placed = new Array(s.subjects.length).fill(0);
     for (let d = 0; d < numDays; d++)
       for (let p = 0; p < periodsPerDay; p++) {
         const si = sch[d][p];
         if (si !== null) placed[si] = (placed[si] || 0) + 1;
       }
-    // Add missing — only into non-frozen empty slots
     s.subjects.forEach((sub, si) => {
       const diff = sub.periodsPerWeek - (placed[si] || 0);
       for (let k = 0; k < diff; k++) {
         const empties = [];
-        for (let d = 0; d < numDays; d++)
-          for (let p = 0; p < periodsPerDay; p++) {
+        for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          for (let p = 0; p < dp; p++) {
             if (sch[d][p] === null && !fz[`${d}_${p}`]) empties.push([d, p]);
           }
+        }
         if (empties.length > 0) {
           const [d, p] = empties[Math.floor(Math.random() * empties.length)];
           sch[d][p] = si;
         }
       }
     });
-    // Remove excess — only from non-frozen slots
     s.subjects.forEach((sub, si) => {
       let cnt = 0;
       for (let d = 0; d < numDays; d++)
@@ -1340,11 +1650,11 @@ function mutateMS(ms) {
   const sch = s[cls.section.id];
   if (!sch) return s;
   const fz = state.frozen[cls.section.id] || {};
-  // Pick two non-frozen slots to swap
   const slots = [];
-  for (let d = 0; d < numDays; d++)
-    for (let p = 0; p < periodsPerDay; p++)
-      if (!fz[`${d}_${p}`]) slots.push([d, p]);
+  for (let d = 0; d < numDays; d++) {
+    const dp = getPeriodsForDay(d, cls.grade);
+    for (let p = 0; p < dp; p++) if (!fz[`${d}_${p}`]) slots.push([d, p]);
+  }
   if (slots.length < 2) return s;
   const [a, b] = [
     slots[Math.floor(Math.random() * slots.length)],
@@ -1357,7 +1667,6 @@ function mutateMS(ms) {
 function crossoverMS(a, b) {
   const child = {};
   const classes = getAllClasses();
-  const { numDays, periodsPerDay } = state.school;
   classes.forEach(({ section: s }) => {
     const sa = a[s.id],
       sb = b[s.id];
@@ -1366,11 +1675,9 @@ function crossoverMS(a, b) {
       if (sa) child[s.id] = cloneMS({ [s.id]: sa })[s.id];
       return;
     }
-    // Crossover per-day, then overwrite frozen slots from existing results
     child[s.id] = sa.map((da, d) =>
       Math.random() < 0.5 ? [...da] : [...sb[d]],
     );
-    // Restore frozen slots
     for (const key of Object.keys(fz)) {
       const [d, p] = key.split("_").map(Number);
       if (state.results?.sched?.[s.id])
@@ -1482,17 +1789,14 @@ function runCP() {
   const maxBT = parseInt(document.getElementById("cp-bt").value);
   addLog("i", `[CP] MaxBT:${maxBT}`);
   const sched = repairMS(randomMultiSchedule());
-  // CP refine: iterate and fix hard violations greedily
   let backtracks = 0;
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
-  // Detect and resolve teacher conflicts by swapping
   let changed = true,
     passes = 0;
   while (changed && passes < 50 && backtracks < maxBT) {
     changed = false;
     passes++;
-    // Build conflict map
     const occ = {};
     classes.forEach(({ section: s }) => {
       for (let d = 0; d < numDays; d++)
@@ -1508,7 +1812,6 @@ function runCP() {
     });
     for (const [, entries] of Object.entries(occ)) {
       if (entries.length < 2) continue;
-      // Conflict: try to swap one entry to an empty slot
       const victim = entries[Math.floor(Math.random() * entries.length)];
       const vs = sched[victim.cid];
       const empties = [];
@@ -1545,7 +1848,6 @@ async function startGeneration() {
     alert("Add subjects to at least one class first.");
     return;
   }
-
   const btn = document.getElementById("genBtn");
   btn.disabled = true;
   btn.textContent = "⏳ Generating...";
@@ -1560,22 +1862,18 @@ async function startGeneration() {
     `[ScheduleForge] ${state.currentAlgo.toUpperCase()} · ${classes.length} classes · ${state.school.numDays}d × ${state.school.periodsPerDay}p`,
   );
   await sleep(20);
-
   let res;
   if (state.currentAlgo === "ga") res = runGA();
   else if (state.currentAlgo === "sa") res = runSA();
   else res = runCP();
-
   const elapsed = Date.now() - t0;
   updateProg(100, "Complete!");
-
   const hard = countHardViolations(res.sched);
   const soft = countSoftViolations(res.sched);
   addLog(
     "s",
     `[DONE] Fitness:${res.fitness.toFixed(0)} Hard:${hard} Soft:${soft} Time:${elapsed}ms`,
   );
-
   state.results = {
     sched: res.sched,
     fitness: res.fitness,
@@ -1583,7 +1881,6 @@ async function startGeneration() {
     soft,
     elapsed,
   };
-
   document.getElementById("st-fit").textContent = res.fitness.toFixed(0);
   document.getElementById("st-hard").textContent = hard;
   document.getElementById("st-hard").style.color =
@@ -1595,7 +1892,6 @@ async function startGeneration() {
   document.getElementById("chip-status").className = "chip chip-green";
   document.getElementById("chip-status").textContent = "Generated";
   updateConflictBadge();
-
   btn.disabled = false;
   btn.textContent = "🚀 Generate All Timetables";
   drawFitnessCanvas();
@@ -1611,7 +1907,7 @@ function collectConflicts(ms) {
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
 
-  // ── 1. Teacher double-bookings ──
+  // 1. Teacher double-bookings
   const occ = {};
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
@@ -1621,18 +1917,20 @@ function collectConflicts(ms) {
         const si = sch[d][p];
         if (si === null) continue;
         const sub = s.subjects[si];
-        if (!sub?.teacherId) continue;
-        const key = `${sub.teacherId}_${d}_${p}`;
-        if (!occ[key]) occ[key] = [];
-        occ[key].push({
-          grade: g.label,
-          section: s.name,
-          subject: sub.name,
-          code: sub.code,
-          teacherId: sub.teacherId,
-          d,
-          p,
-        });
+        const tids = getTeacherIds(sub);
+        for (const tid of tids) {
+          const key = `${tid}_${d}_${p}`;
+          if (!occ[key]) occ[key] = [];
+          occ[key].push({
+            grade: g.label,
+            section: s.name,
+            subject: sub.name,
+            code: sub.code,
+            teacherId: tid,
+            d,
+            p,
+          });
+        }
       }
   });
   for (const [, entries] of Object.entries(occ)) {
@@ -1650,7 +1948,48 @@ function collectConflicts(ms) {
     });
   }
 
-  // ── 2. Back-to-back same subject ──
+  // 2. Room conflicts
+  if (state.constraints.noRoomConflict && state.rooms.length > 0) {
+    const roomOcc = {};
+    classes.forEach(({ grade: g, section: s }) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+      for (let d = 0; d < numDays; d++)
+        for (let p = 0; p < periodsPerDay; p++) {
+          const si = sch[d][p];
+          if (si === null) continue;
+          const sub = s.subjects[si];
+          const rid = sub?.roomId || s.roomId;
+          if (!rid) continue;
+          const key = `${rid}_${d}_${p}`;
+          if (!roomOcc[key]) roomOcc[key] = [];
+          roomOcc[key].push({
+            grade: g.label,
+            section: s.name,
+            subject: sub?.name || "?",
+            d,
+            p,
+            rid,
+          });
+        }
+    });
+    for (const [, entries] of Object.entries(roomOcc)) {
+      if (entries.length < 2) continue;
+      const e = entries[0];
+      const room = state.rooms.find((r) => r.id === e.rid);
+      const classList = entries
+        .map((x) => `${x.grade} ${x.section} (${x.subject})`)
+        .join(" vs ");
+      conflicts.push({
+        severity: "hard",
+        type: "Room Conflict",
+        desc: `<strong>${room?.name || e.rid}</strong> is double-booked: ${classList}`,
+        loc: `${DAYS_S[e.d]} · Period ${e.p + 1}`,
+      });
+    }
+  }
+
+  // 3. Back-to-back same subject
   if (state.constraints.noBackToBack) {
     classes.forEach(({ grade: g, section: s }) => {
       const sch = ms[s.id];
@@ -1670,59 +2009,65 @@ function collectConflicts(ms) {
     });
   }
 
-  // ── 3. Missing periods ──
+  // 4. Missing periods
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
     s.subjects.forEach((sub, si) => {
       let placed = 0;
-      for (let d = 0; d < numDays; d++)
-        for (let p = 0; p < periodsPerDay; p++) if (sch[d][p] === si) placed++;
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) if (sch[d][p] === si) placed++;
+      }
       if (placed < sub.periodsPerWeek) {
         conflicts.push({
           severity: "hard",
           type: "Missing Periods",
-          desc: `<strong>${sub.name}</strong> needs ${sub.periodsPerWeek} sessions/week but only ${placed} were placed`,
+          desc: `<strong>${sub.name}</strong> needs ${sub.periodsPerWeek} sessions/week but only ${placed} placed`,
           loc: `${g.label} ${s.name}`,
         });
       }
     });
   });
 
-  // ── 4. Teacher availability violations ──
+  // 5. Teacher availability violations
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
     const breaks = g && g.breaks ? g.breaks : state.school.breaks;
     for (let d = 0; d < numDays; d++) {
       let clock = t2m(state.school.startTime);
-      for (let p = 0; p < periodsPerDay; p++) {
+      const dp = getPeriodsForDay(d, g);
+      for (let p = 0; p < dp; p++) {
         const si = sch[d][p];
         const sub =
           si !== null && si !== undefined && s.subjects[si]
             ? s.subjects[si]
             : null;
         const dur = sub ? sub.durationMinutes || 50 : 50;
-        if (sub?.teacherId) {
-          const teacher = state.teachers.find((t) => t.id === sub.teacherId);
-          if (teacher?.unavailability?.length) {
-            const pEnd = clock + dur;
-            for (const block of teacher.unavailability) {
-              if (!block.days.includes(d)) continue;
-              const bFrom = t2m(block.fromTime),
-                bTo = t2m(block.toTime);
-              if (clock < bTo && pEnd > bFrom) {
-                const label =
-                  block.type === "unavailable"
-                    ? "🚫 Unavailable"
-                    : "😓 Prefers off";
-                conflicts.push({
-                  severity: "avail",
-                  type: "Availability",
-                  desc: `<strong>${teacher.name}</strong> scheduled during blocked time (${label}: ${block.fromTime}–${block.toTime}) — teaching <strong>${sub.name}</strong>`,
-                  loc: `${g.label} ${s.name} · ${DAYS_S[d]} P${p + 1}`,
-                });
-                break;
+        if (sub) {
+          const tids = getTeacherIds(sub);
+          for (const tid of tids) {
+            const teacher = state.teachers.find((t) => t.id === tid);
+            if (teacher?.unavailability?.length) {
+              const pEnd = clock + dur;
+              for (const block of teacher.unavailability) {
+                if (!block.days.includes(d)) continue;
+                const bFrom = t2m(block.fromTime),
+                  bTo = t2m(block.toTime);
+                if (clock < bTo && pEnd > bFrom) {
+                  const label =
+                    block.type === "unavailable"
+                      ? "🚫 Unavailable"
+                      : "😓 Prefers off";
+                  conflicts.push({
+                    severity: "avail",
+                    type: "Availability",
+                    desc: `<strong>${teacher.name}</strong> scheduled during blocked time (${label}: ${block.fromTime}–${block.toTime}) — teaching <strong>${sub.name}</strong>`,
+                    loc: `${g.label} ${s.name} · ${DAYS_S[d]} P${p + 1}`,
+                  });
+                  break;
+                }
               }
             }
           }
@@ -1734,7 +2079,7 @@ function collectConflicts(ms) {
     }
   });
 
-  // ── 5. Max consecutive ──
+  // 6. Max consecutive
   if (state.constraints.maxConsec) {
     classes.forEach(({ grade: g, section: s }) => {
       const sch = ms[s.id];
@@ -1742,18 +2087,18 @@ function collectConflicts(ms) {
       for (let d = 0; d < numDays; d++) {
         let run = 0,
           runStart = 0;
-        for (let p = 0; p < periodsPerDay; p++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
           if (sch[d][p] !== null) {
             if (run === 0) runStart = p;
             run++;
-            if (run > 3) {
+            if (run > 3)
               conflicts.push({
                 severity: "soft",
                 type: "Long Run",
                 desc: `${run} consecutive periods without a break (max is 3)`,
                 loc: `${g.label} ${s.name} · ${DAYS_S[d]} from P${runStart + 1}`,
               });
-            }
           } else {
             run = 0;
           }
@@ -1762,20 +2107,21 @@ function collectConflicts(ms) {
     });
   }
 
-  // ── 6. Subject imbalance ──
+  // 7. Subject imbalance
   if (state.constraints.balance) {
     classes.forEach(({ grade: g, section: s }) => {
       const sch = ms[s.id];
       if (!sch) return;
       s.subjects.forEach((sub, si) => {
         const perDay = Array(numDays).fill(0);
-        for (let d = 0; d < numDays; d++)
-          for (let p = 0; p < periodsPerDay; p++)
-            if (sch[d][p] === si) perDay[d]++;
-        const max = Math.max(...perDay),
-          min = Math.min(
-            ...perDay.filter((v) => v > 0 || sub.periodsPerWeek >= numDays),
-          );
+        for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          for (let p = 0; p < dp; p++) if (sch[d][p] === si) perDay[d]++;
+        }
+        const max = Math.max(...perDay);
+        const min = Math.min(
+          ...perDay.filter((v, i) => v > 0 || sub.periodsPerWeek >= numDays),
+        );
         if (max - min > 1) {
           conflicts.push({
             severity: "soft",
@@ -1802,7 +2148,6 @@ function renderConflictsPanel() {
   const hard = all.filter((c) => c.severity === "hard");
   const avail = all.filter((c) => c.severity === "avail");
   const soft = all.filter((c) => c.severity === "soft");
-
   const visible =
     conflictFilter === "all"
       ? all
@@ -1811,9 +2156,6 @@ function renderConflictsPanel() {
         : conflictFilter === "avail"
           ? avail
           : soft;
-
-  const summaryColor =
-    hard.length === 0 ? "var(--accent-g)" : "var(--accent-r)";
 
   el.innerHTML = `
     <div class="conflict-summary">
@@ -1834,16 +2176,17 @@ function renderConflictsPanel() {
         <div class="cs-lbl">Total Issues</div>
       </div>
     </div>
-
-    ${hard.length === 0 ? `<div style="padding:10px 14px;background:rgba(0,196,140,.08);border:1px solid rgba(0,196,140,.2);border-radius:var(--r-sm);font-size:12px;color:var(--accent-g);margin-bottom:12px">✅ No hard violations — this timetable is valid. ${soft.length + avail.length > 0 ? "Soft/availability issues are preferences only." : "All constraints satisfied."}</div>` : `<div style="padding:10px 14px;background:rgba(255,77,94,.08);border:1px solid rgba(255,77,94,.2);border-radius:var(--r-sm);font-size:12px;color:var(--accent-r);margin-bottom:12px">⚠ ${hard.length} hard violation${hard.length !== 1 ? "s" : ""} found — timetable is not fully valid. Try re-generating with a higher population or more generations.</div>`}
-
+    ${
+      hard.length === 0
+        ? `<div style="padding:10px 14px;background:rgba(0,196,140,.08);border:1px solid rgba(0,196,140,.2);border-radius:var(--r-sm);font-size:12px;color:var(--accent-g);margin-bottom:12px">✅ No hard violations — this timetable is valid. ${soft.length + avail.length > 0 ? "Soft/availability issues are preferences only." : "All constraints satisfied."}</div>`
+        : `<div style="padding:10px 14px;background:rgba(255,77,94,.08);border:1px solid rgba(255,77,94,.2);border-radius:var(--r-sm);font-size:12px;color:var(--accent-r);margin-bottom:12px">⚠ ${hard.length} hard violation${hard.length !== 1 ? "s" : ""} found — try re-generating with a higher population or more generations.</div>`
+    }
     <div class="conflict-filters">
       <button class="cf-btn ${conflictFilter === "all" ? "active" : ""}" onclick="setConflictFilter('all')">All (${all.length})</button>
       <button class="cf-btn f-hard ${conflictFilter === "hard" ? "active" : ""}" onclick="setConflictFilter('hard')">🔴 Hard (${hard.length})</button>
       <button class="cf-btn f-avail ${conflictFilter === "avail" ? "active" : ""}" onclick="setConflictFilter('avail')">🟣 Availability (${avail.length})</button>
       <button class="cf-btn f-soft ${conflictFilter === "soft" ? "active" : ""}" onclick="setConflictFilter('soft')">🟡 Soft (${soft.length})</button>
     </div>
-
     ${
       visible.length === 0
         ? `<div style="padding:30px;text-align:center;color:var(--text3);font-size:13px">No violations in this category ✓</div>`
@@ -1881,23 +2224,32 @@ function countHardViolations(ms) {
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
   let v = 0;
-  // Teacher conflicts
   const occ = {};
-  classes.forEach(({ section: s }) => {
+  const roomOcc = {};
+  classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
-    for (let d = 0; d < numDays; d++)
-      for (let p = 0; p < periodsPerDay; p++) {
+    for (let d = 0; d < numDays; d++) {
+      const dp = getPeriodsForDay(d, g);
+      for (let p = 0; p < dp; p++) {
         const si = sch[d][p];
         if (si === null) continue;
-        const tid = s.subjects[si]?.teacherId;
-        if (!tid) continue;
-        const key = `${tid}_${d}_${p}`;
-        if (occ[key]) v++;
-        else occ[key] = 1;
+        const sub = s.subjects[si];
+        const tids = getTeacherIds(sub);
+        for (const tid of tids) {
+          const key = `${tid}_${d}_${p}`;
+          if (occ[key]) v++;
+          else occ[key] = 1;
+        }
+        const rid = sub?.roomId || s.roomId;
+        if (rid && state.constraints.noRoomConflict) {
+          const rkey = `${rid}_${d}_${p}`;
+          if (roomOcc[rkey]) v++;
+          else roomOcc[rkey] = 1;
+        }
       }
+    }
   });
-  // Back-to-back
   if (state.constraints.noBackToBack)
     classes.forEach(({ section: s }) => {
       const sch = ms[s.id];
@@ -1916,38 +2268,41 @@ function countSoftViolations(ms) {
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
-    // Max consecutive
     for (let d = 0; d < numDays; d++) {
+      const dp = getPeriodsForDay(d, g);
       let c = 0;
-      for (let p = 0; p < periodsPerDay; p++) {
+      for (let p = 0; p < dp; p++) {
         if (sch[d][p] !== null) {
           c++;
           if (c > 3) v++;
         } else c = 0;
       }
     }
-    // Teacher availability
     for (let d = 0; d < numDays; d++) {
       const breaks = g && g.breaks ? g.breaks : state.school.breaks;
       let clock = t2m(state.school.startTime);
-      for (let p = 0; p < periodsPerDay; p++) {
+      const dp = getPeriodsForDay(d, g);
+      for (let p = 0; p < dp; p++) {
         const si = sch[d][p];
         const sub =
           si !== null && si !== undefined && s.subjects[si]
             ? s.subjects[si]
             : null;
         const dur = sub ? sub.durationMinutes || 50 : 50;
-        if (sub?.teacherId) {
-          const teacher = state.teachers.find((t) => t.id === sub.teacherId);
-          if (teacher?.unavailability?.length) {
-            const pEnd = clock + dur;
-            for (const block of teacher.unavailability) {
-              if (!block.days.includes(d)) continue;
-              const bFrom = t2m(block.fromTime),
-                bTo = t2m(block.toTime);
-              if (clock < bTo && pEnd > bFrom) {
-                v++;
-                break;
+        if (sub) {
+          const tids = getTeacherIds(sub);
+          for (const tid of tids) {
+            const teacher = state.teachers.find((t) => t.id === tid);
+            if (teacher?.unavailability?.length) {
+              const pEnd = clock + dur;
+              for (const block of teacher.unavailability) {
+                if (!block.days.includes(d)) continue;
+                const bFrom = t2m(block.fromTime),
+                  bTo = t2m(block.toTime);
+                if (clock < bTo && pEnd > bFrom) {
+                  v++;
+                  break;
+                }
               }
             }
           }
@@ -1973,7 +2328,7 @@ function renderResultNav() {
   }
   let html = "";
   state.gradeLevels.forEach((g) => {
-    html += `<div class="rn-section"><div class="rn-label" style="display:flex;align-items:center;gap:6px"><div class="rn-dot" style="background:${g.color}"></div>${g.label}</div>`;
+    html += `<div class="rn-section"><div class="rn-label" style="display:flex;align-items:center;gap:6px"><div class="rn-dot" style="background:${g.color}"></div>${g.label}${g.isSHS ? ' <span style="font-size:9px;color:var(--accent-r)">SHS</span>' : ""}</div>`;
     g.sections.forEach((s) => {
       html += `<div class="rn-item ${resultViewClass === s.id ? "active" : ""}" onclick="selectResultClass('${s.id}')"><div class="rn-dot" style="background:${resultViewClass === s.id ? g.color : "var(--text3)"}"></div>${s.name}</div>`;
     });
@@ -2017,10 +2372,9 @@ function renderResultView() {
     return;
   }
   const { numDays } = state.school;
-
-  if (dayViewMode === "week") {
+  if (dayViewMode === "week")
     scroll.innerHTML = renderWeekTable(s, sch, numDays, g);
-  } else {
+  else {
     renderDayButtons();
     scroll.innerHTML = renderDayTable(s, sch, resultViewDay, g);
   }
@@ -2029,22 +2383,32 @@ function renderResultView() {
 function renderWeekTable(s, sch, numDays, g) {
   const hard = countHardViolations(state.results.sched);
   const fz = state.frozen[s.id] || {};
+  const sectionRoom = s.roomId
+    ? state.rooms.find((r) => r.id === s.roomId)
+    : null;
   let html = `<div class="tt-wrap">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-      <span style="font-family:var(--head);font-size:15px;font-weight:700">${g.label} — ${s.name}</span>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="font-family:var(--head);font-size:15px;font-weight:700">${g.label} — ${s.name}${g.isSHS ? ' <span style="font-size:11px;color:var(--accent-r)">SHS Block</span>' : ""}</span>
+      ${sectionRoom ? `<span style="font-size:11px;font-family:var(--mono);color:var(--accent-p)">📍 ${sectionRoom.name}</span>` : ""}
       <span class="conflict-tag ${hard === 0 ? "ct-ok" : "ct-hard"}">${hard === 0 ? "✓ No conflicts" : "⚠ " + hard + " conflicts"}</span>
     </div>
-    <table class="tt-table"><thead><tr>
-      <th>Period</th>`;
-  for (let d = 0; d < numDays; d++)
-    html += `<th>${DAYS_S[d]}<div style="font-weight:400;color:var(--text3);margin-top:1px">${DAYS[d]}</div></th>`;
+    <table class="tt-table"><thead><tr><th>Period</th>`;
+  for (let d = 0; d < numDays; d++) {
+    const dayPeriods = getPeriodsForDay(d, g);
+    const endT =
+      (state.school.dayEndTimes && state.school.dayEndTimes[d]) ||
+      state.school.endTime ||
+      "";
+    html += `<th>${DAYS_S[d]}<div style="font-weight:400;color:var(--text3);margin-top:1px">${DAYS[d]}</div>${endT ? `<div style="font-weight:400;color:var(--border2);font-size:9px">ends ${endT}</div>` : ""}`;
+    html += `</th>`;
+  }
   html += "</tr></thead><tbody>";
 
-  const refSlots = buildTimeSlots(g, sch[0], s.subjects);
+  const refSlots = buildTimeSlots(g, sch[0], s.subjects, 0);
   let periodCounters = new Array(numDays).fill(0);
-  let refPeriod = 0;
 
   refSlots.forEach((slot) => {
+    if (slot.isEndOfDay) return;
     if (slot.isBreak) {
       html += `<tr><td class="time-col" style="font-size:10px;color:var(--text3)">${slot.start}<br>${slot.end}</td>`;
       for (let d = 0; d < numDays; d++) {
@@ -2061,22 +2425,29 @@ function renderWeekTable(s, sch, numDays, g) {
       html += `<tr><td class="time-col"><div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--accent)">P${slot.period}</div><div style="font-size:9px;color:var(--text3)">${slot.start}</div></td>`;
       for (let d = 0; d < numDays; d++) {
         const p = periodCounters[d];
+        const dayPeriods = getPeriodsForDay(d, g);
+        if (p >= dayPeriods) {
+          html += `<td><div class="tt-break" style="font-size:10px;color:var(--border2)">END OF DAY</div></td>`;
+          continue;
+        }
         const si = sch[d][p];
         const key = `${d}_${p}`;
         const frozen = !!fz[key];
         if (si !== null && si !== undefined && s.subjects[si]) {
           const sub = s.subjects[si];
+          const subRoom = sub.roomId
+            ? state.rooms.find((r) => r.id === sub.roomId)
+            : null;
           html += `<td><div class="tt-cell-wrap" onclick="toggleFreeze('${s.id}',${d},${p})" title="${frozen ? "Click to unfreeze" : "Click to freeze this slot"}">
             <div class="tt-slot sc${sub.color % 10}${frozen ? " frozen" : ""}">
               <div class="tt-code">${sub.code} <span style="opacity:.5">${sub.durationMinutes || 50}min</span></div>
               <div class="tt-name">${sub.name}</div>
-              <div class="tt-teacher">${teacherName(sub.teacherId)}</div>
+              <div class="tt-teacher">${teacherNames(sub)}${subRoom ? ` · <span style="color:var(--accent-p)">📍${subRoom.name}</span>` : ""}</div>
             </div></div></td>`;
         } else html += `<td><div class="tt-empty">—</div></td>`;
         periodCounters[d]++;
       }
       html += "</tr>";
-      refPeriod++;
     }
   });
   html += "</tbody></table></div>";
@@ -2084,29 +2455,41 @@ function renderWeekTable(s, sch, numDays, g) {
 }
 
 function renderDayTable(s, sch, day, g) {
-  const slots = buildTimeSlots(g, sch[day], s.subjects);
+  const slots = buildTimeSlots(g, sch[day], s.subjects, day);
   const fz = state.frozen[s.id] || {};
+  const dayPeriods = getPeriodsForDay(day, g);
   let html = `<div class="tt-wrap">
     <div style="font-family:var(--head);font-size:15px;font-weight:700;margin-bottom:4px">${g?.label || ""} — ${s.name}</div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">${DAYS[day]} · Exact times based on subject durations</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:14px">${DAYS[day]}${state.school.dayEndTimes && state.school.dayEndTimes[day] ? " · ends " + state.school.dayEndTimes[day] : ""} · Exact times based on subject durations</div>
     <table class="tt-table" style="max-width:500px"><thead><tr><th>Time</th><th>Subject</th></tr></thead><tbody>`;
   let pi = 0;
   slots.forEach((slot) => {
+    if (slot.isEndOfDay) {
+      html += `<tr><td class="time-col" style="color:var(--text3)">${slot.start}</td><td><div class="tt-break" style="color:var(--border2)">END OF DAY</div></td></tr>`;
+      return;
+    }
     if (slot.isBreak) {
       html += `<tr><td class="time-col">${slot.start}<br><span style="color:var(--text3)">${slot.end}</span><br><span style="font-size:9px;color:var(--text3)">${slot.duration}min</span></td>
         <td><div class="tt-break">${slot.label || "☕ BREAK"} <span style="font-size:10px;opacity:.6">${slot.duration}min</span></div></td></tr>`;
     } else {
+      if (pi >= dayPeriods) {
+        html += `<tr><td class="time-col">${slot.start}</td><td><div class="tt-break" style="color:var(--border2)">END OF DAY</div></td></tr>`;
+        return;
+      }
       const si = sch[day][pi];
       const key = `${day}_${pi}`;
       const frozen = !!fz[key];
       html += `<tr><td class="time-col"><div style="font-family:var(--mono);font-size:11px;font-weight:600;color:var(--accent)">P${slot.period}</div>${slot.start}<br><span style="color:var(--text3)">${slot.end}</span></td>`;
       if (si !== null && si !== undefined && s.subjects[si]) {
         const sub = s.subjects[si];
+        const subRoom = sub.roomId
+          ? state.rooms.find((r) => r.id === sub.roomId)
+          : null;
         html += `<td><div class="tt-cell-wrap" onclick="toggleFreeze('${s.id}',${day},${pi})" title="${frozen ? "Click to unfreeze" : "Click to freeze"}">
           <div class="tt-slot sc${sub.color % 10}${frozen ? " frozen" : ""}">
             <div class="tt-code">${sub.code} <span style="opacity:.5">${sub.durationMinutes || 50}min</span></div>
             <div class="tt-name">${sub.name}</div>
-            <div class="tt-teacher">${teacherName(sub.teacherId)}</div>
+            <div class="tt-teacher">${teacherNames(sub)}${subRoom ? ` · <span style="color:var(--accent-p)">📍${subRoom.name}</span>` : ""}</div>
           </div></div></td>`;
       } else html += `<td><div class="tt-empty">—</div></td>`;
       html += "</tr>";
@@ -2132,7 +2515,6 @@ function setDayView(mode) {
   if (mode === "day") renderDayButtons();
   renderResultView();
 }
-
 function renderDayButtons() {
   const { numDays } = state.school;
   document.getElementById("dayBtns").innerHTML = DAYS.slice(0, numDays)
@@ -2142,7 +2524,6 @@ function renderDayButtons() {
     )
     .join("");
 }
-
 function selectDay(i) {
   resultViewDay = i;
   renderDayButtons();
@@ -2173,7 +2554,6 @@ function renderTeacherView() {
   }
   const teacher = state.teachers.find((t) => t.id === tid);
   if (!teacher) return;
-
   const { numDays, periodsPerDay } = state.school;
   const tsch = Array.from({ length: numDays }, () =>
     new Array(periodsPerDay).fill(null),
@@ -2187,27 +2567,45 @@ function renderTeacherView() {
         const si = sch[d][p];
         if (si === null) continue;
         const sub = s.subjects[si];
-        if (sub?.teacherId === tid)
+        if (sub && getTeacherIds(sub).includes(tid)) {
+          const subRoom = sub.roomId
+            ? state.rooms.find((r) => r.id === sub.roomId)
+            : null;
+          const sectRoom = s.roomId
+            ? state.rooms.find((r) => r.id === s.roomId)
+            : null;
+          const roomLabel = subRoom
+            ? subRoom.name
+            : sectRoom
+              ? sectRoom.name
+              : null;
           tsch[d][p] = {
             className: `${g.label}–${s.name}`,
             subName: sub.name,
             code: sub.code,
             color: sub.color,
             dur: sub.durationMinutes || 50,
+            room: roomLabel,
+            coTeachers: getTeacherIds(sub)
+              .filter((id) => id !== tid)
+              .map((id) => {
+                const t = state.teachers.find((t) => t.id === id);
+                return t ? t.name : id;
+              }),
           };
+        }
       }
   });
   let totalPeriods = 0;
   for (let d = 0; d < numDays; d++)
     for (let p = 0; p < periodsPerDay; p++) if (tsch[d][p]) totalPeriods++;
-
   const fc = getAllClasses()[0];
   const slots = buildTimeSlots(
     fc?.grade || null,
     (fc ? state.results.sched[fc.section.id] : null)?.[0] || null,
     fc?.section.subjects || [],
+    0,
   );
-
   let html = `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
     <div style="font-family:var(--head);font-size:17px;font-weight:700">${teacher.name}</div>
     <span class="chip chip-blue">${teacher.dept || "—"}</span>
@@ -2219,6 +2617,7 @@ function renderTeacherView() {
   html += "</tr></thead><tbody>";
   let pi = 0;
   slots.forEach((slot) => {
+    if (slot.isEndOfDay) return;
     if (slot.isBreak) {
       html += `<tr><td class="time-col" style="font-size:10px">${slot.start}</td>${Array(
         numDays,
@@ -2230,7 +2629,7 @@ function renderTeacherView() {
       for (let d = 0; d < numDays; d++) {
         const e = tsch[d][pi];
         if (e)
-          html += `<td class="tcell-own"><div class="tt-slot sc${e.color % 10}"><div class="tt-code">${e.code} <span style="opacity:.5">${e.dur}min</span></div><div class="tt-name">${e.subName}</div><div class="tt-teacher">${e.className}</div></div></td>`;
+          html += `<td class="tcell-own"><div class="tt-slot sc${e.color % 10}"><div class="tt-code">${e.code} <span style="opacity:.5">${e.dur}min</span></div><div class="tt-name">${e.subName}</div><div class="tt-teacher">${e.className}${e.room ? ` · <span style="color:var(--accent-p)">📍${e.room}</span>` : ""}${e.coTeachers && e.coTeachers.length ? ` · <span style="color:var(--accent-y)">👥 w/ ${e.coTeachers.join(", ")}</span>` : ""}</div></div></td>`;
         else
           html += `<td><div class="tt-empty" style="font-size:13px;color:var(--border3)">—</div></td>`;
       }
@@ -2301,22 +2700,40 @@ function exportCurrentCSV() {
   const { grade: g, section: s } = found;
   const sch = state.results.sched[s.id];
   const { numDays } = state.school;
-  const slots = buildTimeSlots(g, sch[0], s.subjects);
+  const slots = buildTimeSlots(g, sch[0], s.subjects, 0);
   let csv = `Class,${g.label} - ${s.name}\nGenerated,${new Date().toLocaleDateString()}\n\n`;
   csv += "Period,Time," + DAYS.slice(0, numDays).join(",") + "\n";
   let pi = 0;
   slots.forEach((slot) => {
+    if (slot.isEndOfDay) return;
     if (slot.isBreak) {
       csv += `Break (${slot.duration}min),${slot.start}-${slot.end},${Array(numDays).fill("BREAK").join(",")}\n`;
     } else {
       const row = [pi + 1, `${slot.start}-${slot.end}`];
       for (let d = 0; d < numDays; d++) {
         const si = sch[d][pi];
-        row.push(
-          si !== null && s.subjects[si]
-            ? `${s.subjects[si].code} ${s.subjects[si].name} (${s.subjects[si].durationMinutes || 50}min)`
-            : "FREE",
-        );
+        const dp = getPeriodsForDay(d, g);
+        if (pi >= dp) {
+          row.push("END OF DAY");
+          continue;
+        }
+        if (si !== null && s.subjects[si]) {
+          const sub = s.subjects[si];
+          const subRoom = sub.roomId
+            ? state.rooms.find((r) => r.id === sub.roomId)
+            : null;
+          const sectRoom = s.roomId
+            ? state.rooms.find((r) => r.id === s.roomId)
+            : null;
+          const roomInfo = subRoom
+            ? ` [${subRoom.name}]`
+            : sectRoom
+              ? ` [${sectRoom.name}]`
+              : "";
+          row.push(
+            `${sub.code} ${sub.name} (${sub.durationMinutes || 50}min)${roomInfo}`,
+          );
+        } else row.push("FREE");
       }
       csv += row.join(",") + "\n";
       pi++;
@@ -2336,6 +2753,7 @@ function exportTeacherCSV() {
     fc?.grade || null,
     (fc ? state.results.sched[fc.section.id] : null)?.[0] || null,
     fc?.section.subjects || [],
+    0,
   );
   const tsch = Array.from({ length: numDays }, () =>
     new Array(periodsPerDay).fill(null),
@@ -2348,14 +2766,19 @@ function exportTeacherCSV() {
         const si = sch[d][p];
         if (si === null) continue;
         const sub = s.subjects[si];
-        if (sub?.teacherId === tid)
+        if (sub && getTeacherIds(sub).includes(tid)) {
+          const subRoom = sub.roomId
+            ? state.rooms.find((r) => r.id === sub.roomId)
+            : null;
           tsch[d][p] =
-            `${g.label}-${s.name}: ${sub.name} (${sub.durationMinutes || 50}min)`;
+            `${g.label}-${s.name}: ${sub.name} (${sub.durationMinutes || 50}min)${subRoom ? ` [${subRoom.name}]` : ""}`;
+        }
       }
   });
   let csv = `Teacher,${teacher.name} (${tid})\n\nPeriod,Time,${DAYS.slice(0, numDays).join(",")}\n`;
   let pi = 0;
   slots.forEach((slot) => {
+    if (slot.isEndOfDay) return;
     if (slot.isBreak) {
       csv += `Break (${slot.duration}min),${slot.start}-${slot.end},${Array(numDays).fill("BREAK").join(",")}\n`;
     } else {
@@ -2427,24 +2850,38 @@ function loadDemo() {
   document.getElementById("numDays").value = "5";
   document.getElementById("periodsPerDay").value = "8";
   document.querySelector("#periodsPerDay + .rv").textContent = "8";
-  document.getElementById("periodDuration").value = "50";
-  document.querySelector("#periodDuration + .rv").textContent = "50m";
   document.getElementById("numBreaks").value = "2";
   document.querySelector("#numBreaks + .rv").textContent = "2";
+  const endEl = document.getElementById("endTime");
+  if (endEl) endEl.value = "15:15";
+
   state.school = {
     name: "Rizal NHS",
     numDays: 5,
     periodsPerDay: 8,
     startTime: "07:00",
+    endTime: "15:15",
+    dayEndTimes: ["15:15", "15:15", "14:15", "15:15", "15:15"],
+    dayPeriods: [8, 8, 5, 8, 8], // Wednesday only has 5 periods
     numBreaks: 2,
     breaks: [
       { afterPeriod: 3, duration: 15 },
       { afterPeriod: 6, duration: 50 },
     ],
   };
-  renderBreaks();
 
-  // Teachers
+  // Demo rooms
+  state.rooms = [
+    { id: "R101", name: "Room 101", capacity: 40, type: "Classroom" },
+    { id: "R102", name: "Room 102", capacity: 40, type: "Classroom" },
+    { id: "R103", name: "Room 103", capacity: 40, type: "Classroom" },
+    { id: "R104", name: "Room 104", capacity: 40, type: "Classroom" },
+    { id: "R105", name: "Room 105", capacity: 40, type: "Classroom" },
+    { id: "LAB1", name: "Science Lab", capacity: 35, type: "Laboratory" },
+    { id: "GYM", name: "Gymnasium", capacity: 200, type: "Gym/Court" },
+    { id: "HE", name: "HE Room", capacity: 30, type: "Laboratory" },
+  ];
+
   state.teachers = [
     {
       id: "T001",
@@ -2532,64 +2969,80 @@ function loadDemo() {
       name: "Mathematics",
       periodsPerWeek: 5,
       durationMinutes: 60,
+      teacherIds: ["T001"],
       teacherId: "T001",
       color: colorCounter++ % 10,
+      roomId: null,
     },
     {
       code: "ENG7",
       name: "English Language",
       periodsPerWeek: 5,
       durationMinutes: 60,
+      teacherIds: ["T002"],
       teacherId: "T002",
       color: colorCounter++ % 10,
+      roomId: null,
     },
     {
       code: "SCI7",
       name: "Integrated Science",
       periodsPerWeek: 4,
       durationMinutes: 60,
+      teacherIds: ["T003"],
       teacherId: "T003",
       color: colorCounter++ % 10,
+      roomId: "LAB1",
     },
     {
       code: "FIL7",
       name: "Filipino",
       periodsPerWeek: 4,
       durationMinutes: 60,
+      teacherIds: ["T004"],
       teacherId: "T004",
       color: colorCounter++ % 10,
+      roomId: null,
     },
     {
       code: "AP7",
       name: "Araling Panlipunan",
       periodsPerWeek: 3,
       durationMinutes: 50,
+      teacherIds: ["T005"],
       teacherId: "T005",
       color: colorCounter++ % 10,
+      roomId: null,
     },
     {
       code: "TLE7",
       name: "TLE",
       periodsPerWeek: 2,
       durationMinutes: 90,
+      teacherIds: ["T006"],
       teacherId: "T006",
       color: colorCounter++ % 10,
+      roomId: "HE",
     },
     {
       code: "MAPEH7",
       name: "MAPEH",
       periodsPerWeek: 2,
       durationMinutes: 90,
+      teacherIds: ["T007"],
       teacherId: "T007",
       color: colorCounter++ % 10,
+      roomId: "GYM",
     },
     {
       code: "ESP7",
       name: "ESP / Values",
       periodsPerWeek: 1,
       durationMinutes: 50,
+      teacherIds: ["T008"],
       teacherId: "T008",
       color: colorCounter++ % 10,
+      roomId: null,
     },
   ];
   const subjectsG10 = [
@@ -2598,64 +3051,80 @@ function loadDemo() {
       name: "Algebra & Geometry",
       periodsPerWeek: 5,
       durationMinutes: 60,
+      teacherIds: ["T009"],
       teacherId: "T009",
       color: colorCounter++ % 10,
+      roomId: null,
     },
     {
       code: "ENG10",
       name: "English Literature",
       periodsPerWeek: 5,
       durationMinutes: 60,
+      teacherIds: ["T002"],
       teacherId: "T002",
       color: colorCounter++ % 10,
+      roomId: null,
     },
     {
       code: "SCI10",
       name: "Integrated Science",
       periodsPerWeek: 4,
       durationMinutes: 60,
+      teacherIds: ["T010"],
       teacherId: "T010",
       color: colorCounter++ % 10,
+      roomId: "LAB1",
     },
     {
       code: "FIL10",
       name: "Filipino",
       periodsPerWeek: 4,
       durationMinutes: 60,
+      teacherIds: ["T004"],
       teacherId: "T004",
       color: colorCounter++ % 10,
+      roomId: null,
     },
     {
       code: "AP10",
       name: "Araling Panlipunan",
       periodsPerWeek: 3,
       durationMinutes: 50,
+      teacherIds: ["T005"],
       teacherId: "T005",
       color: colorCounter++ % 10,
+      roomId: null,
     },
     {
       code: "TLE10",
       name: "TLE",
       periodsPerWeek: 2,
       durationMinutes: 90,
+      teacherIds: ["T006"],
       teacherId: "T006",
       color: colorCounter++ % 10,
+      roomId: "HE",
     },
     {
       code: "MAPEH10",
       name: "MAPEH",
       periodsPerWeek: 2,
       durationMinutes: 90,
+      teacherIds: ["T007"],
       teacherId: "T007",
       color: colorCounter++ % 10,
+      roomId: "GYM",
     },
     {
       code: "ESP10",
       name: "ESP / Values",
       periodsPerWeek: 1,
       durationMinutes: 50,
+      teacherIds: ["T008"],
       teacherId: "T008",
       color: colorCounter++ % 10,
+      roomId: null,
     },
   ];
 
@@ -2665,6 +3134,7 @@ function loadDemo() {
       level: 7,
       label: "Grade 7",
       color: "#d94f1e",
+      isSHS: false,
       _customBreaks: false,
       breaks: [
         { afterPeriod: 3, duration: 15 },
@@ -2675,16 +3145,19 @@ function loadDemo() {
           id: "g7s0",
           name: "Section A",
           subjects: subjectsG7.map((s) => ({ ...s })),
+          roomId: "R101",
         },
         {
           id: "g7s1",
           name: "Section B",
           subjects: subjectsG7.map((s) => ({ ...s })),
+          roomId: "R102",
         },
         {
           id: "g7s2",
           name: "Section C",
           subjects: subjectsG7.map((s) => ({ ...s })),
+          roomId: "R103",
         },
       ],
     },
@@ -2693,32 +3166,37 @@ function loadDemo() {
       level: 10,
       label: "Grade 10",
       color: "#c48010",
+      isSHS: false,
       _customBreaks: true,
       breaks: [
         { afterPeriod: 4, duration: 15 },
         { afterPeriod: 7, duration: 60 },
-      ], // Grade 10 has longer lunch!
+      ],
       sections: [
         {
           id: "g10s0",
           name: "Section A",
           subjects: subjectsG10.map((s) => ({ ...s })),
+          roomId: "R104",
         },
         {
           id: "g10s1",
           name: "Section B",
           subjects: subjectsG10.map((s) => ({ ...s })),
+          roomId: "R105",
         },
       ],
     },
   ];
 
+  renderBreaks();
+  renderRoomManager();
   renderGradeLevelManager();
   updateTopChips();
   updateSchoolPreview();
-  renderBreaks();
+  renderDayEndTimes();
   alert(
-    "Demo data loaded! 5 classes across Grade 7 (3 sections) and Grade 10 (2 sections). Head to Generate → click 🚀",
+    "Demo loaded! 5 classes · 8 rooms · Grade 7 (3 sections) + Grade 10 (2 sections). Wednesday ends at 2:15 PM. Head to Generate → 🚀",
   );
 }
 
@@ -2726,10 +3204,9 @@ function loadDemo() {
 // EXCEL IMPORT / EXPORT
 // ═══════════════════════════════════════════════════════
 let importedWorkbook = null;
-let importedData = { teachers: [], classes: [], subjects: [] };
+let importedData = { teachers: [], classes: [], subjects: [], rooms: [] };
 let previewSheet = "teachers";
 
-// ── Drag & drop wiring ──
 (function () {
   const zone = document.getElementById("dropZone");
   zone.addEventListener("dragover", (e) => {
@@ -2765,8 +3242,6 @@ function processXLSX(file) {
 function parseWorkbook() {
   const wb = importedWorkbook;
   const names = wb.SheetNames.map((n) => n.toLowerCase().trim());
-
-  // Find sheets by name (flexible matching)
   const findSheet = (...keys) => {
     for (const k of keys) {
       const idx = names.findIndex((n) => n.includes(k));
@@ -2781,15 +3256,14 @@ function parseWorkbook() {
   const rawTeachers = findSheet("teacher");
   const rawClasses = findSheet("class", "section", "grade");
   const rawSubjects = findSheet("subject");
+  const rawRooms = findSheet("room");
 
-  const errors = [];
-  const warnings = [];
+  const errors = [],
+    warnings = [];
 
-  // ── Parse teachers ──
   importedData.teachers = [];
-  if (!rawTeachers) {
-    errors.push('Missing "teachers" sheet. Expected a sheet named "teachers".');
-  } else {
+  if (!rawTeachers) errors.push('Missing "teachers" sheet.');
+  else
     rawTeachers.forEach((row, i) => {
       const id = String(row["teacher_id"] || row["id"] || "").trim();
       const name = String(row["teacher_name"] || row["name"] || "").trim();
@@ -2810,16 +3284,32 @@ function parseWorkbook() {
       }
       importedData.teachers.push({ id, name, dept, maxPeriods: maxP });
     });
-  }
 
-  // ── Parse classes ──
+  importedData.rooms = [];
+  if (rawRooms)
+    rawRooms.forEach((row, i) => {
+      const id = String(row["room_id"] || row["id"] || "").trim();
+      const name = String(row["room_name"] || row["name"] || "").trim();
+      const cap = parseInt(row["capacity"] || 40) || 40;
+      const type = String(row["type"] || "Classroom").trim();
+      if (!id || !name) {
+        warnings.push(`Rooms row ${i + 2}: skipped (missing room_id or name)`);
+        return;
+      }
+      if (importedData.rooms.find((r) => r.id === id)) {
+        warnings.push(`Rooms row ${i + 2}: duplicate room_id "${id}" skipped`);
+        return;
+      }
+      importedData.rooms.push({ id, name, capacity: cap, type });
+    });
+
   importedData.classes = [];
-  if (!rawClasses) {
-    errors.push('Missing "classes" sheet. Expected a sheet named "classes".');
-  } else {
+  if (!rawClasses) errors.push('Missing "classes" sheet.');
+  else
     rawClasses.forEach((row, i) => {
       const gl = parseInt(row["grade_level"] || row["grade"] || 0);
       const sect = String(row["section_name"] || row["section"] || "").trim();
+      const roomId = String(row["room_id"] || "").trim();
       if (!gl || !sect) {
         errors.push(
           `Classes row ${i + 2}: missing grade_level or section_name`,
@@ -2835,15 +3325,17 @@ function parseWorkbook() {
         warnings.push(`Classes row ${i + 2}: duplicate ${gl}/${sect} skipped`);
         return;
       }
-      importedData.classes.push({ key, grade: gl, section: sect });
+      importedData.classes.push({
+        key,
+        grade: gl,
+        section: sect,
+        roomId: roomId || null,
+      });
     });
-  }
 
-  // ── Parse subjects ──
   importedData.subjects = [];
-  if (!rawSubjects) {
-    errors.push('Missing "subjects" sheet. Expected a sheet named "subjects".');
-  } else {
+  if (!rawSubjects) errors.push('Missing "subjects" sheet.');
+  else
     rawSubjects.forEach((row, i) => {
       const gl = parseInt(row["grade_level"] || row["grade"] || 0);
       const sect = String(row["section_name"] || row["section"] || "").trim();
@@ -2860,11 +3352,11 @@ function parseWorkbook() {
             50,
         ) || 50;
       const tid = String(row["teacher_id"] || row["teacher"] || "").trim();
+      const roomId = String(row["room_id"] || "").trim();
       if (!gl || !sect || !code || !name) {
         errors.push(`Subjects row ${i + 2}: missing required fields`);
         return;
       }
-      // Warn if teacher not in teachers sheet
       if (tid && !importedData.teachers.find((t) => t.id === tid))
         warnings.push(
           `Subjects row ${i + 2}: teacher_id "${tid}" not found in teachers sheet`,
@@ -2877,14 +3369,14 @@ function parseWorkbook() {
         periodsPerWeek: ppw,
         durationMinutes: dur,
         teacherId: tid,
+        roomId: roomId || null,
       });
     });
-  }
 
-  // ── Build preview tabs ──
-  const sections = ["teachers", "classes", "subjects"];
+  const sections = ["teachers", "rooms", "classes", "subjects"];
   const raws = {
     teachers: rawTeachers || [],
+    rooms: rawRooms || [],
     classes: rawClasses || [],
     subjects: rawSubjects || [],
   };
@@ -2897,7 +3389,6 @@ function parseWorkbook() {
     .join("");
   renderPreviewTable(previewSheet, raws[previewSheet] || []);
 
-  // ── Show messages ──
   const msgEl = document.getElementById("importMessages");
   let html = "";
   if (errors.length)
@@ -2910,7 +3401,7 @@ function parseWorkbook() {
       )
       .join("");
   if (!errors.length)
-    html += `<div class="import-ok">✓ ${importedData.teachers.length} teachers · ${importedData.classes.length} classes · ${importedData.subjects.length} subject rows — ready to apply</div>`;
+    html += `<div class="import-ok">✓ ${importedData.teachers.length} teachers · ${importedData.rooms.length} rooms · ${importedData.classes.length} classes · ${importedData.subjects.length} subject rows — ready to apply</div>`;
   msgEl.innerHTML = html;
   document.getElementById("applyImportBtn").disabled = errors.length > 0;
 }
@@ -2922,10 +3413,9 @@ function switchPreview(sheet) {
     .forEach((t, i) =>
       t.classList.toggle(
         "active",
-        ["teachers", "classes", "subjects"][i] === sheet,
+        ["teachers", "rooms", "classes", "subjects"][i] === sheet,
       ),
     );
-  // Re-parse to get raw data
   const wb = importedWorkbook;
   const names = wb.SheetNames.map((n) => n.toLowerCase().trim());
   const findSheet = (...keys) => {
@@ -2940,6 +3430,7 @@ function switchPreview(sheet) {
   };
   const raws = {
     teachers: findSheet("teacher"),
+    rooms: findSheet("room"),
     classes: findSheet("class", "section", "grade"),
     subjects: findSheet("subject"),
   };
@@ -2966,7 +3457,7 @@ function renderPreviewTable(sheet, rows) {
 }
 
 function applyImport() {
-  const { teachers: iT, classes: iC, subjects: iS } = importedData;
+  const { teachers: iT, classes: iC, subjects: iS, rooms: iR } = importedData;
   const GRADE_COLORS = {
     7: "#d94f1e",
     8: "#2e8a5a",
@@ -2975,17 +3466,23 @@ function applyImport() {
     11: "#c02020",
     12: "#8c1e5a",
   };
-
-  // 1. Merge teachers (add new, skip existing IDs)
   let added = 0;
   iT.forEach((t) => {
     if (!state.teachers.find((x) => x.id === t.id)) {
-      state.teachers.push({ ...t, unavailability: t.unavailability || [] });
+      state.teachers.push({ ...t, unavailability: [] });
       added++;
     }
   });
 
-  // 2. Build grade levels & sections from classes sheet
+  // Apply rooms
+  let roomsAdded = 0;
+  iR.forEach((r) => {
+    if (!state.rooms.find((x) => x.id === r.id)) {
+      state.rooms.push({ ...r });
+      roomsAdded++;
+    }
+  });
+
   iC.forEach((c) => {
     let grade = state.gradeLevels.find((g) => g.level === c.grade);
     if (!grade) {
@@ -2995,6 +3492,9 @@ function applyImport() {
         label: "Grade " + c.grade,
         color: GRADE_COLORS[c.grade] || "#888",
         sections: [],
+        isSHS: c.grade >= 11,
+        breaks: state.school.breaks.map((b) => ({ ...b })),
+        _customBreaks: false,
       };
       state.gradeLevels.push(grade);
       state.gradeLevels.sort((a, b) => a.level - b.level);
@@ -3010,11 +3510,11 @@ function applyImport() {
           Date.now(),
         name: c.section,
         subjects: [],
+        roomId: c.roomId || null,
       });
     }
   });
 
-  // 3. Attach subjects
   let sc = 0;
   iS.forEach((sub) => {
     const grade = state.gradeLevels.find((g) => g.level === sub.grade);
@@ -3028,36 +3528,28 @@ function applyImport() {
         periodsPerWeek: sub.periodsPerWeek,
         durationMinutes: sub.durationMinutes || 50,
         teacherId: sub.teacherId,
+        roomId: sub.roomId || null,
         color: colorCounter++ % 10,
       });
       sc++;
     }
   });
 
-  // 4. Refresh all UI
   renderGradeLevelManager();
   renderTeacherTable();
   drawTeacherLoadChart();
+  renderRoomManager();
   updateTopChips();
   updateSchoolPreview();
-
-  // 5. Mark import badge
-  const nb = document.getElementById("nb-import");
-  nb.style.display = "inline";
-
-  // 6. Summary
+  document.getElementById("nb-import").style.display = "inline";
   document.getElementById("importMessages").innerHTML =
-    `<div class="import-ok">✅ Import applied — ${added} teachers added · ${iC.length} classes configured · ${sc} subjects loaded. Head to <strong>Generate</strong> when ready.</div>`;
-
-  // Show toast
+    `<div class="import-ok">✅ Import applied — ${added} teachers · ${roomsAdded} rooms · ${iC.length} classes · ${sc} subjects loaded.</div>`;
   setTimeout(() => showPanel("teachers"), 800);
 }
 
-// ── Template Download ──
 function downloadTemplate() {
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1 – teachers
   const teachersData = [
     ["teacher_id", "teacher_name", "department", "max_periods_per_week"],
     ["T001", "Ms. Ana Reyes", "Mathematics", 30],
@@ -3074,25 +3566,39 @@ function downloadTemplate() {
   styleHeaderRow(wsT, teachersData[0].length);
   XLSX.utils.book_append_sheet(wb, wsT, "teachers");
 
-  // Sheet 2 – classes
+  const roomsData = [
+    ["room_id", "room_name", "capacity", "type"],
+    ["R101", "Room 101", 40, "Classroom"],
+    ["R102", "Room 102", 40, "Classroom"],
+    ["R103", "Room 103", 40, "Classroom"],
+    ["R104", "Room 104", 40, "Classroom"],
+    ["LAB1", "Science Lab", 35, "Laboratory"],
+    ["GYM", "Gymnasium", 200, "Gym/Court"],
+    ["HE", "HE Room", 30, "Laboratory"],
+  ];
+  const wsR = XLSX.utils.aoa_to_sheet(roomsData);
+  wsR["!cols"] = [{ wch: 10 }, { wch: 18 }, { wch: 10 }, { wch: 14 }];
+  styleHeaderRow(wsR, roomsData[0].length);
+  XLSX.utils.book_append_sheet(wb, wsR, "rooms");
+
   const classesData = [
-    ["grade_level", "section_name"],
-    [7, "Section A"],
-    [7, "Section B"],
-    [7, "Section C"],
-    [8, "Section A"],
-    [8, "Section B"],
-    [9, "Section A"],
-    [9, "Section B"],
-    [10, "Section A"],
-    [10, "Section B"],
+    ["grade_level", "section_name", "room_id"],
+    [7, "Section A", "R101"],
+    [7, "Section B", "R102"],
+    [7, "Section C", "R103"],
+    [8, "Section A", "R104"],
+    [8, "Section B", ""],
+    [9, "Section A", ""],
+    [10, "Section A", ""],
+    [10, "Section B", ""],
+    [11, "STEM-A", ""],
+    [12, "HUMSS-A", ""],
   ];
   const wsC = XLSX.utils.aoa_to_sheet(classesData);
-  wsC["!cols"] = [{ wch: 14 }, { wch: 16 }];
+  wsC["!cols"] = [{ wch: 14 }, { wch: 16 }, { wch: 10 }];
   styleHeaderRow(wsC, classesData[0].length);
   XLSX.utils.book_append_sheet(wb, wsC, "classes");
 
-  // Sheet 3 – subjects (one row per class-subject combo)
   const subRows = [
     [
       "grade_level",
@@ -3102,27 +3608,27 @@ function downloadTemplate() {
       "periods_per_week",
       "duration_minutes",
       "teacher_id",
+      "room_id",
     ],
   ];
   const baseSubjects = [
-    ["MATH", "Mathematics", 5, 60, "T001"],
-    ["ENG", "English Language", 5, 60, "T002"],
-    ["SCI", "Integrated Science", 4, 60, "T003"],
-    ["FIL", "Filipino", 4, 60, "T004"],
-    ["AP", "Araling Panlipunan", 3, 50, "T005"],
-    ["TLE", "Technology & Livelihood", 2, 90, "T006"],
-    ["MAPEH", "MAPEH", 2, 90, "T007"],
-    ["ESP", "ESP / Values Education", 1, 50, "T008"],
+    ["MATH", "Mathematics", 5, 60, "T001", null],
+    ["ENG", "English Language", 5, 60, "T002", null],
+    ["SCI", "Integrated Science", 4, 60, "T003", "LAB1"],
+    ["FIL", "Filipino", 4, 60, "T004", null],
+    ["AP", "Araling Panlipunan", 3, 50, "T005", null],
+    ["TLE", "Technology & Livelihood", 2, 90, "T006", "HE"],
+    ["MAPEH", "MAPEH", 2, 90, "T007", "GYM"],
+    ["ESP", "ESP / Values Education", 1, 50, "T008", null],
   ];
   [
     [7, "Section A"],
     [7, "Section B"],
-    [7, "Section C"],
     [10, "Section A"],
     [10, "Section B"],
   ].forEach(([gl, sect]) => {
-    baseSubjects.forEach(([code, name, ppw, dur, tid]) => {
-      subRows.push([gl, sect, code + gl, name, ppw, dur, tid]);
+    baseSubjects.forEach(([code, name, ppw, dur, tid, rid]) => {
+      subRows.push([gl, sect, code + gl, name, ppw, dur, tid, rid || ""]);
     });
   });
   const wsS = XLSX.utils.aoa_to_sheet(subRows);
@@ -3134,6 +3640,7 @@ function downloadTemplate() {
     { wch: 18 },
     { wch: 18 },
     { wch: 12 },
+    { wch: 10 },
   ];
   styleHeaderRow(wsS, subRows[0].length);
   XLSX.utils.book_append_sheet(wb, wsS, "subjects");
@@ -3142,7 +3649,6 @@ function downloadTemplate() {
 }
 
 function styleHeaderRow(ws, cols) {
-  // Bold header cells
   for (let c = 0; c < cols; c++) {
     const addr = XLSX.utils.encode_cell({ r: 0, c });
     if (!ws[addr]) continue;
@@ -3154,11 +3660,18 @@ function styleHeaderRow(ws, cols) {
   }
 }
 
+// Helper used by Import panel (may not have a named function — harmless)
+function showImportMsg(type, msg) {
+  console.log(type, msg);
+}
+
 // ═══════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════
 renderBreaks();
+renderRoomManager();
 updateSchoolPreview();
+renderDayEndTimes();
 renderConstraints();
 selAlgo("ga");
 renderGradeLevelManager();

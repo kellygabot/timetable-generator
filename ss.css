@@ -674,3 +674,10 @@ input[type=range]::-webkit-slider-thumb{
   color: var(--accent);
 }
 .freeze-hint { color: var(--text3); flex: 1; }
+
+/* Subject edit highlight */
+.subj-pill.subj-editing {
+  border-color: var(--accent-y);
+  background: rgba(196,128,16,.08);
+  box-shadow: 2px 2px 0 var(--accent-y);
+}
