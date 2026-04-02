@@ -32,6 +32,8 @@ const state = {
     minTeacherIdle: false,
     noRoomConflict: true,
     sameDayGrade: true, // ← NEW: same grade = same subject on same days
+    sameDayGradeSoft: false,
+    onePeriodPerDay: true, // ← NEW: one period max per day
   },
   results: null,
   currentAlgo: "ga",
@@ -1225,8 +1227,18 @@ const HARD_CONSTRAINTS = [
     name: "Same-Grade Same-Day Subjects",
     desc: "All sections in a grade must schedule each subject on the exact same days of the week — only the period (time) may differ between sections",
   },
+  {
+    id: "onePeriodPerDay",
+    name: "One Period Per Day Max",
+    desc: "A subject should only appear maximum once per day per section",
+  },
 ];
 const SOFT_CONSTRAINTS = [
+  {
+    id: "sameDayGradeSoft",
+    name: "Same-Grade Same-Day Subjects",
+    desc: "Preferentially schedule each subject for all sections in a grade on the same days, but don't strictly enforce it.",
+  },
   {
     id: "maxConsec",
     name: "Max 3 Consecutive Classes",
@@ -1634,7 +1646,7 @@ function alignSameGradeDays(ms) {
 // Returns number of (section, subject, day) mismatches vs ref.
 // ═══════════════════════════════════════════════════════
 function countSameDayViolations(ms) {
-  if (!state.constraints.sameDayGrade) return 0;
+  if (!state.constraints.sameDayGrade && !state.constraints.sameDayGradeSoft) return 0;
   const { numDays } = state.school;
   let violations = 0;
 
@@ -1726,7 +1738,7 @@ function fitnessMS(ms) {
             teacherSlots[tid] = Array.from({ length: numDays }, () =>
               new Array(periodsPerDay).fill(null),
             );
-          if (teacherSlots[tid][d][p] !== null) score -= HW;
+          if (teacherSlots[tid][d][p] !== null) score -= (HW * 100);
           else teacherSlots[tid][d][p] = s.id;
         }
         const rid = sub.roomId || s.roomId;
@@ -1853,12 +1865,33 @@ function fitnessMS(ms) {
     });
   });
 
+  // ── NEW: One Period Per Day Max ──
+  if (state.constraints.onePeriodPerDay) {
+    classes.forEach(({ grade: g, section: s }) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+      for (let si = 0; si < s.subjects.length; si++) {
+        for (let d = 0; d < numDays; d++) {
+          const dayPeriods = getPeriodsForDay(d, g);
+          let count = 0;
+          for (let p = 0; p < dayPeriods; p++) {
+            if (sch[d][p] === si) count++;
+          }
+          if (count > 1) score -= (HW * 5) * (count - 1);
+        }
+      }
+    });
+  }
+
   // ── NEW: Same-grade same-day hard penalty ──
   // Weight is proportional to periodsPerWeek so the GA strongly
   // prefers solutions where all sections share the same day pattern.
   if (state.constraints.sameDayGrade) {
     const sdvCount = countSameDayViolations(ms);
     score -= sdvCount * HW;
+  } else if (state.constraints.sameDayGradeSoft) {
+    const sdvCount = countSameDayViolations(ms);
+    score -= sdvCount * SW;
   }
 
   return score;
@@ -2413,8 +2446,36 @@ function collectConflicts(ms) {
     });
   }
 
+  // ── NEW: One Period Per Day Max ──
+  if (state.constraints.onePeriodPerDay) {
+    classes.forEach(({ grade: g, section: s }) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+      s.subjects.forEach((sub, si) => {
+        const dupes = [];
+        for (let d = 0; d < numDays; d++) {
+          const dayPeriods = getPeriodsForDay(d, g);
+          let count = 0;
+          for (let p = 0; p < dayPeriods; p++) {
+            if (sch[d][p] === si) count++;
+          }
+          if (count > 1) dupes.push(DAYS_S[d]);
+        }
+        if (dupes.length > 0) {
+          conflicts.push({
+            severity: "hard",
+            type: "Duplicate Subject on Day",
+            desc: `<strong>${sub.name}</strong> appears multiple times on ${dupes.join(", ")}`,
+            loc: `${g.label} ${s.name}`,
+          });
+        }
+      });
+    });
+  }
+
   // 8. ── NEW: Same-grade same-day violations ──
-  if (state.constraints.sameDayGrade) {
+  if (state.constraints.sameDayGrade || state.constraints.sameDayGradeSoft) {
+    const severityType = state.constraints.sameDayGrade ? "hard" : "soft";
     state.gradeLevels.forEach((g) => {
       if (g.sections.length < 2) return;
       const s0 = g.sections[0];
@@ -2465,7 +2526,7 @@ function collectConflicts(ms) {
             const curStr =
               [...currDays].map((d) => DAYS_S[d]).join(", ") || "none";
             conflicts.push({
-              severity: "hard",
+              severity: severityType,
               type: "Same-Day Mismatch",
               desc: `<strong>${sub.name}</strong> — ${g.label} ${s0.name} has it on [${refStr}] but ${s.name} has it on [${curStr}]`,
               loc: `${g.label} · ${s0.name} vs ${s.name}`,
@@ -2602,7 +2663,26 @@ function countHardViolations(ms) {
     });
 
   // ── NEW: count same-day violations as hard ──
-  v += countSameDayViolations(ms);
+  if (state.constraints.sameDayGrade) {
+    v += countSameDayViolations(ms);
+  }
+
+  // ── NEW: One Period Per Day ──
+  if (state.constraints.onePeriodPerDay) {
+    classes.forEach(({ grade: g, section: s }) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+      const { numDays } = state.school;
+      for (let si = 0; si < s.subjects.length; si++) {
+        for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          let count = 0;
+          for (let p = 0; p < dp; p++) if (sch[d][p] === si) count++;
+          if (count > 1) v += (count - 1);
+        }
+      }
+    });
+  }
 
   return v;
 }
