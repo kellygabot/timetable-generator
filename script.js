@@ -31,6 +31,7 @@ const state = {
     afternoonPE: false,
     minTeacherIdle: false,
     noRoomConflict: true,
+    sameDayGrade: true, // ← NEW: same grade = same subject on same days
   },
   results: null,
   currentAlgo: "ga",
@@ -400,30 +401,32 @@ function toggleTeacherDropdown() {
   if (!list) return;
   const isDirectlyHidden = list.style.display === "none";
   list.style.display = isDirectlyHidden ? "block" : "none";
-  
+
   // Close when clicking outside
   if (isDirectlyHidden) {
     const closer = (e) => {
-      if (!e.target.closest('.multi-select-dropdown')) {
-        list.style.display = 'none';
-        document.removeEventListener('click', closer);
+      if (!e.target.closest(".multi-select-dropdown")) {
+        list.style.display = "none";
+        document.removeEventListener("click", closer);
       }
     };
-    setTimeout(() => document.addEventListener('click', closer), 10);
+    setTimeout(() => document.addEventListener("click", closer), 10);
   }
 }
 
 function updateSelectedTeachersDisplay() {
-  const checks = document.querySelectorAll('input[name="subj-teacher-check"]:checked');
+  const checks = document.querySelectorAll(
+    'input[name="subj-teacher-check"]:checked',
+  );
   const label = document.getElementById("teacher-selected-labels");
   if (!label) return;
-  
+
   if (checks.length === 0) {
     label.textContent = "Choose teachers...";
     label.style.color = "var(--text3)";
   } else {
-    const names = Array.from(checks).map(c => {
-      const t = state.teachers.find(teacher => teacher.id === c.value);
+    const names = Array.from(checks).map((c) => {
+      const t = state.teachers.find((teacher) => teacher.id === c.value);
       return t ? t.name : c.value;
     });
     label.textContent = names.join(", ");
@@ -988,12 +991,20 @@ function renderClassEditor() {
               <span id="teacher-selected-labels" style="font-size:12px; color:var(--text3)">Choose teachers...</span>
             </div>
             <div class="dropdown-list" id="teacher-list-content" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--s1); border:1px solid var(--border2); border-top:none; box-shadow:var(--shadow-lg); border-radius:0 0 var(--r-sm) var(--r-sm); z-index:200; max-height:240px; overflow-y:auto; padding:8px 0">
-              ${state.teachers.length === 0 ? `<div style="padding:12px 16px; font-size:12px; color:var(--text3)">Add teachers first in the Teachers panel.</div>` : state.teachers.map(t => `
+              ${
+                state.teachers.length === 0
+                  ? `<div style="padding:12px 16px; font-size:12px; color:var(--text3)">Add teachers first in the Teachers panel.</div>`
+                  : state.teachers
+                      .map(
+                        (t) => `
                 <label style="display:flex; align-items:center; gap:10px; padding:8px 16px; cursor:pointer; font-weight:500; font-size:13px; transition:var(--transition); margin:0" onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background='var(--s1)'">
                   <input type="checkbox" name="subj-teacher-check" value="${t.id}" ${editTeacherIds.includes(t.id) ? "checked" : ""} onchange="updateSelectedTeachersDisplay()">
                   <span>${t.name} <em style="font-style:normal; font-size:11px; color:var(--text3); margin-left:4px">(${t.id})</em></span>
                 </label>
-              `).join('')}
+              `,
+                      )
+                      .join("")
+              }
             </div>
           </div>
         </div>
@@ -1055,7 +1066,6 @@ function setSectionRoom(sectionId, roomId) {
 function editSubjectFromClass(idx) {
   editingSubjectIdx = idx;
   renderClassEditor();
-  // Scroll to top of editor
   document.getElementById("classEditor").scrollTop = 0;
 }
 
@@ -1097,9 +1107,10 @@ function addSubjectToClass() {
   const roomEl = document.getElementById("e-room");
   const roomId = roomEl ? roomEl.value : "";
 
-  // Read multi-select checkboxes
-  const teacherChecks = document.querySelectorAll('input[name="subj-teacher-check"]:checked');
-  const teacherIds = Array.from(teacherChecks).map(c => c.value);
+  const teacherChecks = document.querySelectorAll(
+    'input[name="subj-teacher-check"]:checked',
+  );
+  const teacherIds = Array.from(teacherChecks).map((c) => c.value);
 
   if (!code || !name) {
     alert("Code and name required");
@@ -1116,7 +1127,7 @@ function addSubjectToClass() {
     existing.periodsPerWeek = pw;
     existing.durationMinutes = dur;
     existing.teacherIds = teacherIds;
-    existing.teacherId = teacherIds[0] || ""; // backward compat
+    existing.teacherId = teacherIds[0] || "";
     existing.roomId = roomId || null;
     editingSubjectIdx = null;
   } else {
@@ -1130,7 +1141,7 @@ function addSubjectToClass() {
       periodsPerWeek: pw,
       durationMinutes: dur,
       teacherIds,
-      teacherId: teacherIds[0] || "", // backward compat
+      teacherId: teacherIds[0] || "",
       roomId: roomId || null,
       color: colorCounter++ % 10,
     });
@@ -1208,6 +1219,12 @@ const HARD_CONSTRAINTS = [
     name: "No Room Conflicts",
     desc: "Two different classes cannot occupy the same room in the same period",
   },
+  // ← NEW constraint
+  {
+    id: "sameDayGrade",
+    name: "Same-Grade Same-Day Subjects",
+    desc: "All sections in a grade must schedule each subject on the exact same days of the week — only the period (time) may differ between sections",
+  },
 ];
 const SOFT_CONSTRAINTS = [
   {
@@ -1247,6 +1264,7 @@ function renderConstraints() {
 }
 
 function constraintRow(c, hard) {
+  // Only the two core hard constraints are permanently locked
   const locked =
     hard && (c.id === "noTeacherConflict" || c.id === "allPeriodsPlaced");
   return `<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--border)">
@@ -1303,7 +1321,6 @@ function buildTimeSlots(grade, daySchedule, subjects, dayIdx) {
         : null;
     const dur = sub ? sub.durationMinutes || 50 : 50;
     if (time + dur > endMin + 5) {
-      // small buffer for rounding
       slots.push({
         period: null,
         start: m2t(time),
@@ -1466,6 +1483,213 @@ function cloneMS(ms) {
   return c;
 }
 
+// ═══════════════════════════════════════════════════════
+// SAME-GRADE SAME-DAY: build reference day map
+// Returns: { gradeId: { subjectCode: Set<dayIndex> } }
+// Built from section[0] of each grade.
+// ═══════════════════════════════════════════════════════
+function buildGradeRefDays(ms) {
+  const ref = {};
+  const { numDays } = state.school;
+  state.gradeLevels.forEach((g) => {
+    if (g.sections.length < 2) return;
+    ref[g.id] = {};
+    const s0 = g.sections[0];
+    const sch0 = ms[s0.id];
+    if (!sch0) return;
+    s0.subjects.forEach((sub, si) => {
+      const days = new Set();
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          if (sch0[d][p] === si) {
+            days.add(d);
+            break;
+          }
+        }
+      }
+      ref[g.id][sub.code] = days;
+    });
+  });
+  return ref;
+}
+
+// ═══════════════════════════════════════════════════════
+// SAME-GRADE SAME-DAY: align non-ref sections to ref days
+// Moves subject sessions between days (swapping with null slots
+// or other unfrozen slots) without changing total period counts.
+// ═══════════════════════════════════════════════════════
+function alignSameGradeDays(ms) {
+  if (!state.constraints.sameDayGrade) return ms;
+  const { numDays } = state.school;
+
+  state.gradeLevels.forEach((g) => {
+    if (g.sections.length < 2) return;
+
+    // Build reference days from section 0
+    const s0 = g.sections[0];
+    const sch0 = ms[s0.id];
+    if (!sch0) return;
+
+    // ref: subjectCode -> Set of days where s0 has it
+    const ref = {};
+    s0.subjects.forEach((sub, si) => {
+      const days = new Set();
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          if (sch0[d][p] === si) {
+            days.add(d);
+            break;
+          }
+        }
+      }
+      ref[sub.code] = days;
+    });
+
+    // Align sections 1..N to reference
+    g.sections.slice(1).forEach((s) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+      const fz = state.frozen[s.id] || {};
+
+      s.subjects.forEach((sub, si) => {
+        const refDays = ref[sub.code];
+        if (!refDays || refDays.size === 0) return;
+
+        // Find days this section currently has the subject
+        const currDays = new Set();
+        for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          for (let p = 0; p < dp; p++) {
+            if (sch[d][p] === si) {
+              currDays.add(d);
+              break;
+            }
+          }
+        }
+
+        // Days to remove (have subject but shouldn't)
+        const toRemove = [...currDays].filter((d) => !refDays.has(d));
+        // Days to add (should have subject but don't)
+        const toAdd = [...refDays].filter((d) => !currDays.has(d));
+
+        // Process pairs: move one session from a "wrong" day to a "missing" day
+        const pairs = Math.min(toRemove.length, toAdd.length);
+        for (let i = 0; i < pairs; i++) {
+          const removeDay = toRemove[i];
+          const addDay = toAdd[i];
+
+          // Find an unfrozen slot of this subject on removeDay
+          const dp_r = getPeriodsForDay(removeDay, g);
+          let removedPeriod = -1;
+          for (let p = 0; p < dp_r; p++) {
+            if (sch[removeDay][p] === si && !fz[`${removeDay}_${p}`]) {
+              removedPeriod = p;
+              break;
+            }
+          }
+          if (removedPeriod === -1) continue; // all frozen, skip
+
+          // Find a free (null) unfrozen slot on addDay
+          const dp_a = getPeriodsForDay(addDay, g);
+          let addedPeriod = -1;
+          for (let p = 0; p < dp_a; p++) {
+            if (sch[addDay][p] === null && !fz[`${addDay}_${p}`]) {
+              addedPeriod = p;
+              break;
+            }
+          }
+
+          if (addedPeriod !== -1) {
+            // Clean move: null slot available on addDay
+            sch[removeDay][removedPeriod] = null;
+            sch[addDay][addedPeriod] = si;
+          } else {
+            // Try swapping with another non-frozen subject on addDay
+            for (let p = 0; p < dp_a; p++) {
+              const victim = sch[addDay][p];
+              if (victim !== null && victim !== si && !fz[`${addDay}_${p}`]) {
+                // Check victim doesn't need to be on addDay per ref
+                const victimCode = s.subjects[victim]?.code;
+                const victimRef = ref[victimCode];
+                if (victimRef && victimRef.has(addDay)) continue; // victim belongs on addDay
+                // Do the swap
+                sch[removeDay][removedPeriod] = victim;
+                sch[addDay][p] = si;
+                break;
+              }
+            }
+          }
+        }
+      });
+    });
+  });
+
+  return ms;
+}
+
+// ═══════════════════════════════════════════════════════
+// COUNT SAME-DAY VIOLATIONS (for fitness & hard count)
+// Returns number of (section, subject, day) mismatches vs ref.
+// ═══════════════════════════════════════════════════════
+function countSameDayViolations(ms) {
+  if (!state.constraints.sameDayGrade) return 0;
+  const { numDays } = state.school;
+  let violations = 0;
+
+  state.gradeLevels.forEach((g) => {
+    if (g.sections.length < 2) return;
+    const s0 = g.sections[0];
+    const sch0 = ms[s0.id];
+    if (!sch0) return;
+
+    // Build ref
+    const ref = {};
+    s0.subjects.forEach((sub, si) => {
+      const days = new Set();
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          if (sch0[d][p] === si) {
+            days.add(d);
+            break;
+          }
+        }
+      }
+      ref[sub.code] = days;
+    });
+
+    // Check remaining sections
+    g.sections.slice(1).forEach((s) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+
+      s.subjects.forEach((sub, si) => {
+        const refDays = ref[sub.code];
+        if (!refDays) return;
+
+        const currDays = new Set();
+        for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          for (let p = 0; p < dp; p++) {
+            if (sch[d][p] === si) {
+              currDays.add(d);
+              break;
+            }
+          }
+        }
+
+        // Count symmetric difference
+        for (const d of refDays) if (!currDays.has(d)) violations++;
+        for (const d of currDays) if (!refDays.has(d)) violations++;
+      });
+    });
+  });
+
+  return violations;
+}
+
 function fitnessMS(ms) {
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
@@ -1482,7 +1706,7 @@ function fitnessMS(ms) {
   });
 
   // Room occupation
-  const roomSlots = {}; // roomId_d_p -> classId
+  const roomSlots = {};
 
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
@@ -1502,11 +1726,9 @@ function fitnessMS(ms) {
             teacherSlots[tid] = Array.from({ length: numDays }, () =>
               new Array(periodsPerDay).fill(null),
             );
-          if (teacherSlots[tid][d][p] !== null)
-            score -= HW; // teacher conflict
+          if (teacherSlots[tid][d][p] !== null) score -= HW;
           else teacherSlots[tid][d][p] = s.id;
         }
-        // Room conflict check
         const rid = sub.roomId || s.roomId;
         if (rid && state.constraints.noRoomConflict) {
           const rkey = `${rid}_${d}_${p}`;
@@ -1555,6 +1777,7 @@ function fitnessMS(ms) {
     }
   });
 
+  // Back-to-back, consecutive, morning core, afternoon PE
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
@@ -1615,6 +1838,7 @@ function fitnessMS(ms) {
     }
   });
 
+  // All periods placed
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
     if (!sch) return;
@@ -1628,6 +1852,14 @@ function fitnessMS(ms) {
         score -= HW * (sub.periodsPerWeek - placed);
     });
   });
+
+  // ── NEW: Same-grade same-day hard penalty ──
+  // Weight is proportional to periodsPerWeek so the GA strongly
+  // prefers solutions where all sections share the same day pattern.
+  if (state.constraints.sameDayGrade) {
+    const sdvCount = countSameDayViolations(ms);
+    score -= sdvCount * HW;
+  }
 
   return score;
 }
@@ -1681,6 +1913,10 @@ function repairMS(ms) {
       }
     });
   });
+
+  // ── NEW: after period counts are correct, enforce same-day alignment ──
+  alignSameGradeDays(ms);
+
   return ms;
 }
 
@@ -2177,7 +2413,75 @@ function collectConflicts(ms) {
     });
   }
 
+  // 8. ── NEW: Same-grade same-day violations ──
+  if (state.constraints.sameDayGrade) {
+    state.gradeLevels.forEach((g) => {
+      if (g.sections.length < 2) return;
+      const s0 = g.sections[0];
+      const sch0 = ms[s0.id];
+      if (!sch0) return;
+
+      // Build ref from section 0
+      const ref = {};
+      s0.subjects.forEach((sub, si) => {
+        const days = new Set();
+        for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          for (let p = 0; p < dp; p++) {
+            if (sch0[d][p] === si) {
+              days.add(d);
+              break;
+            }
+          }
+        }
+        ref[sub.code] = { days, name: sub.name };
+      });
+
+      g.sections.slice(1).forEach((s) => {
+        const sch = ms[s.id];
+        if (!sch) return;
+        s.subjects.forEach((sub, si) => {
+          const refEntry = ref[sub.code];
+          if (!refEntry) return;
+          const refDays = refEntry.days;
+
+          const currDays = new Set();
+          for (let d = 0; d < numDays; d++) {
+            const dp = getPeriodsForDay(d, g);
+            for (let p = 0; p < dp; p++) {
+              if (sch[d][p] === si) {
+                currDays.add(d);
+                break;
+              }
+            }
+          }
+
+          const missing = [...refDays].filter((d) => !currDays.has(d));
+          const extra = [...currDays].filter((d) => !refDays.has(d));
+
+          if (missing.length > 0 || extra.length > 0) {
+            const refStr =
+              [...refDays].map((d) => DAYS_S[d]).join(", ") || "none";
+            const curStr =
+              [...currDays].map((d) => DAYS_S[d]).join(", ") || "none";
+            conflicts.push({
+              severity: "hard",
+              type: "Same-Day Mismatch",
+              desc: `<strong>${sub.name}</strong> — ${g.label} ${s0.name} has it on [${refStr}] but ${s.name} has it on [${curStr}]`,
+              loc: `${g.label} · ${s0.name} vs ${s.name}`,
+            });
+          }
+        });
+      });
+    });
+  }
+
   return conflicts;
+}
+
+function setConflictFilter(f) {
+  conflictFilter = f;
+  renderConflictsPanel();
 }
 
 function renderConflictsPanel() {
@@ -2248,11 +2552,6 @@ function renderConflictsPanel() {
     }`;
 }
 
-function setConflictFilter(f) {
-  conflictFilter = f;
-  renderConflictsPanel();
-}
-
 function updateConflictBadge() {
   if (!state.results) return;
   const all = collectConflicts(state.results.sched);
@@ -2301,6 +2600,10 @@ function countHardViolations(ms) {
         for (let p = 0; p < periodsPerDay - 1; p++)
           if (sch[d][p] !== null && sch[d][p] === sch[d][p + 1]) v++;
     });
+
+  // ── NEW: count same-day violations as hard ──
+  v += countSameDayViolations(ms);
+
   return v;
 }
 
@@ -2437,7 +2740,6 @@ function renderWeekTable(s, sch, numDays, g) {
     </div>
     <table class="tt-table"><thead><tr><th>Period</th>`;
   for (let d = 0; d < numDays; d++) {
-    const dayPeriods = getPeriodsForDay(d, g);
     const endT =
       (state.school.dayEndTimes && state.school.dayEndTimes[d]) ||
       state.school.endTime ||
@@ -2905,7 +3207,7 @@ function loadDemo() {
     startTime: "08:00",
     endTime: "15:15",
     dayEndTimes: ["15:15", "15:15", "14:15", "15:15", "15:15"],
-    dayPeriods: [6, 6, 5, 6, 6], // Wednesday only has 5 periods
+    dayPeriods: [6, 6, 5, 6, 6],
     numBreaks: 2,
     breaks: [
       { afterPeriod: 1, duration: 15 },
@@ -2913,7 +3215,6 @@ function loadDemo() {
     ],
   };
 
-  // Demo rooms
   state.rooms = [
     { id: "R101", name: "Room 101", capacity: 40, type: "Classroom" },
     { id: "R102", name: "Room 102", capacity: 40, type: "Classroom" },
@@ -3517,7 +3818,6 @@ function applyImport() {
     }
   });
 
-  // Apply rooms
   let roomsAdded = 0;
   iR.forEach((r) => {
     if (!state.rooms.find((x) => x.id === r.id)) {
@@ -3592,7 +3892,6 @@ function applyImport() {
 
 function downloadTemplate() {
   const wb = XLSX.utils.book_new();
-
   const teachersData = [
     ["teacher_id", "teacher_name", "department", "max_periods_per_week"],
     ["T001", "Ms. Ana Reyes", "Mathematics", 30],
@@ -3687,7 +3986,6 @@ function downloadTemplate() {
   ];
   styleHeaderRow(wsS, subRows[0].length);
   XLSX.utils.book_append_sheet(wb, wsS, "subjects");
-
   XLSX.writeFile(wb, "ScheduleForge_Template.xlsx");
 }
 
@@ -3703,7 +4001,6 @@ function styleHeaderRow(ws, cols) {
   }
 }
 
-// Helper used by Import panel (may not have a named function — harmless)
 function showImportMsg(type, msg) {
   console.log(type, msg);
 }
