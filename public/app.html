@@ -435,21 +435,21 @@
                       <div class="field">
                         <label>Population Size</label>
                         <div class="range-row">
-                          <input type="range" id="ga-pop" min="10" max="1200" value="80" oninput="this.nextElementSibling.textContent=this.value"/>
+                          <input type="range" id="ga-pop" min="10" max="2400" value="80" oninput="this.nextElementSibling.textContent=this.value"/>
                           <span class="rv">80</span>
                         </div>
                         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.5">
-                          Candidate timetables competing each generation. <span style="color:var(--accent-g)">↑ Higher (up to 1,200)</span> = more diversity, better quality — but slower.<br><em>Recommended: 80–160 standard; 200–600 for complex schools.</em>
+                          Candidate timetables competing each generation. <span style="color:var(--accent-g)">↑ Higher (up to 2,400)</span> = more diversity, better quality — but slower.<br><em>Recommended: 80–160 standard; 200–600 for complex schools.</em>
                         </div>
                       </div>
                       <div class="field">
                         <label>Generations</label>
                         <div class="range-row">
-                          <input type="range" id="ga-gen" min="50" max="6000" value="300" step="25" oninput="this.nextElementSibling.textContent=this.value"/>
+                          <input type="range" id="ga-gen" min="50" max="12000" value="300" step="25" oninput="this.nextElementSibling.textContent=this.value"/>
                           <span class="rv">300</span>
                         </div>
                         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.5">
-                          Evolutionary cycles to run. <span style="color:var(--accent-g)">↑ More (up to 6,000)</span> = more refinement — takes proportionally longer.<br><em>Recommended: 300–600; 1000–3000 for difficult problems.</em>
+                          Evolutionary cycles to run. <span style="color:var(--accent-g)">↑ More (up to 12,000)</span> = more refinement — takes proportionally longer.<br><em>Recommended: 300–600; 1000–3000 for difficult problems.</em>
                         </div>
                       </div>
                       <div class="field">
@@ -480,11 +480,11 @@
                       <div class="field">
                         <label>Initial Temperature</label>
                         <div class="range-row">
-                          <input type="range" id="sa-temp" min="500" max="240000" value="20000" step="500" oninput="this.nextElementSibling.textContent=this.value"/>
+                          <input type="range" id="sa-temp" min="500" max="480000" value="20000" step="500" oninput="this.nextElementSibling.textContent=this.value"/>
                           <span class="rv">20000</span>
                         </div>
                         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.5">
-                          Willingness to accept worse solutions at the start. <span style="color:var(--accent-g)">↑ Higher (up to 240,000)</span> = more exploration, better escape from bad starts.<br><em>Recommended: 16,000–30,000. Increase for very complex schools.</em>
+                          Willingness to accept worse solutions at the start. <span style="color:var(--accent-g)">↑ Higher (up to 480,000)</span> = more exploration, better escape from bad starts.<br><em>Recommended: 16,000–30,000. Increase for very complex schools.</em>
                         </div>
                       </div>
                       <div class="field">
@@ -500,11 +500,11 @@
                       <div class="field">
                         <label>Iterations</label>
                         <div class="range-row">
-                          <input type="range" id="sa-iter" min="500" max="120000" value="8000" step="250" oninput="this.nextElementSibling.textContent=this.value"/>
+                          <input type="range" id="sa-iter" min="500" max="240000" value="8000" step="250" oninput="this.nextElementSibling.textContent=this.value"/>
                           <span class="rv">8000</span>
                         </div>
                         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.5">
-                          Total swap attempts. <span style="color:var(--accent-g)">↑ More (up to 120,000)</span> = more refinement — directly proportional to runtime.<br><em>Recommended: 8,000–20,000. Match to cooling rate so temperature reaches near zero.</em>
+                          Total swap attempts. <span style="color:var(--accent-g)">↑ More (up to 240,000)</span> = more refinement — directly proportional to runtime.<br><em>Recommended: 8,000–20,000. Match to cooling rate so temperature reaches near zero.</em>
                         </div>
                       </div>
                     </div>
@@ -518,7 +518,7 @@
                       <div class="field">
                         <label>Max Backtracks</label>
                         <div class="range-row">
-                          <input type="range" id="cp-bt" min="200" max="60000" value="4000" step="200" oninput="this.nextElementSibling.textContent=this.value"/>
+                          <input type="range" id="cp-bt" min="200" max="120000" value="4000" step="200" oninput="this.nextElementSibling.textContent=this.value"/>
                           <span class="rv">4000</span>
                         </div>
                         <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.5">Max conflict-fixing moves. Increase if Hard Viols. stays above 0. <em>Recommended: 4,000–20,000.</em></div>
