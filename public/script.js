@@ -34,6 +34,7 @@ const state = {
     sameDayGrade: true, // ← NEW: same grade = same subject on same days
     sameDayGradeSoft: false,
     onePeriodPerDay: true, // ← NEW: one period max per day
+    mapehNotFirstOrFriday: true,
   },
   results: null,
   currentAlgo: "ga",
@@ -1260,11 +1261,29 @@ const SOFT_CONSTRAINTS = [
     desc: "Physical Education and elective subjects after midday",
   },
   {
+    id: "mapehNotFirstOrFriday",
+    name: "MAPEH Avoid P1 & Friday",
+    desc: "Prefer Music, Art, PE, and Health away from first period and Fridays",
+  },
+  {
     id: "minTeacherIdle",
     name: "Minimize Teacher Idle Time",
     desc: "Cluster a teacher's periods to reduce gaps in their schedule",
   },
 ];
+
+function isMapehSubject(sub) {
+  if (!sub) return false;
+  const text = `${sub.name || ""} ${sub.code || ""}`.toLowerCase();
+  return (
+    text.includes("mapeh") ||
+    text.includes("music") ||
+    text.includes("art") ||
+    text.includes("pe") ||
+    text.includes("physical") ||
+    text.includes("health")
+  );
+}
 
 function renderConstraints() {
   document.getElementById("hard-constraints").innerHTML = HARD_CONSTRAINTS.map(
@@ -1847,6 +1866,20 @@ function fitnessMS(ms) {
         const avg = s.subjects[si].periodsPerWeek / numDays;
         score -= perDay.reduce((a, v) => a + Math.abs(v - avg), 0) * SW * 0.5;
       });
+    }
+
+    if (state.constraints.mapehNotFirstOrFriday) {
+      for (let d = 0; d < numDays; d++) {
+        const dayPeriods = getPeriodsForDay(d, g);
+        for (let p = 0; p < dayPeriods; p++) {
+          const si = sch[d][p];
+          if (si === null || si === undefined) continue;
+          const sub = s.subjects[si];
+          if (!isMapehSubject(sub)) continue;
+          if (p === 0) score -= SW * 2;
+          if (d === 4) score -= SW * 3;
+        }
+      }
     }
   });
 
@@ -2446,6 +2479,31 @@ function collectConflicts(ms) {
     });
   }
 
+  // 7b. MAPEH preferred away from first period and Friday
+  if (state.constraints.mapehNotFirstOrFriday) {
+    classes.forEach(({ grade: g, section: s }) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          const si = sch[d][p];
+          if (si === null || si === undefined) continue;
+          const sub = s.subjects[si];
+          if (!isMapehSubject(sub)) continue;
+          if (p === 0 || d === 4) {
+            conflicts.push({
+              severity: "soft",
+              type: "MAPEH Placement",
+              desc: `<strong>${sub.name}</strong> is placed ${p === 0 ? "in first period" : "on Friday"} (soft preference is to avoid both)`,
+              loc: `${g.label} ${s.name} · ${DAYS_S[d]} P${p + 1}`,
+            });
+          }
+        }
+      }
+    });
+  }
+
   // ── NEW: One Period Per Day Max ──
   if (state.constraints.onePeriodPerDay) {
     classes.forEach(({ grade: g, section: s }) => {
@@ -2736,6 +2794,20 @@ function countSoftViolations(ms) {
         clock += dur;
         const brk = breaks.find((b) => b.afterPeriod === p + 1);
         if (brk) clock += brk.duration;
+      }
+    }
+
+    if (state.constraints.mapehNotFirstOrFriday) {
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          const si = sch[d][p];
+          if (si === null || si === undefined) continue;
+          const sub = s.subjects[si];
+          if (!isMapehSubject(sub)) continue;
+          if (p === 0) v++;
+          if (d === 4) v++;
+        }
       }
     }
   });
