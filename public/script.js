@@ -1665,7 +1665,8 @@ function alignSameGradeDays(ms) {
 // Returns number of (section, subject, day) mismatches vs ref.
 // ═══════════════════════════════════════════════════════
 function countSameDayViolations(ms) {
-  if (!state.constraints.sameDayGrade && !state.constraints.sameDayGradeSoft) return 0;
+  if (!state.constraints.sameDayGrade && !state.constraints.sameDayGradeSoft)
+    return 0;
   const { numDays } = state.school;
   let violations = 0;
 
@@ -1757,7 +1758,7 @@ function fitnessMS(ms) {
             teacherSlots[tid] = Array.from({ length: numDays }, () =>
               new Array(periodsPerDay).fill(null),
             );
-          if (teacherSlots[tid][d][p] !== null) score -= (HW * 100);
+          if (teacherSlots[tid][d][p] !== null) score -= HW * 100;
           else teacherSlots[tid][d][p] = s.id;
         }
         const rid = sub.roomId || s.roomId;
@@ -1910,7 +1911,7 @@ function fitnessMS(ms) {
           for (let p = 0; p < dayPeriods; p++) {
             if (sch[d][p] === si) count++;
           }
-          if (count > 1) score -= (HW * 5) * (count - 1);
+          if (count > 1) score -= HW * 5 * (count - 1);
         }
       }
     });
@@ -2736,7 +2737,7 @@ function countHardViolations(ms) {
           const dp = getPeriodsForDay(d, g);
           let count = 0;
           for (let p = 0; p < dp; p++) if (sch[d][p] === si) count++;
-          if (count > 1) v += (count - 1);
+          if (count > 1) v += count - 1;
         }
       }
     });
