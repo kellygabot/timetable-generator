@@ -34,6 +34,7 @@ const state = {
     sameDayGrade: true, // ← NEW: same grade = same subject on same days
     sameDayGradeSoft: false,
     onePeriodPerDay: true, // ← NEW: one period max per day
+    mapehNotFirstOrFriday: true,
   },
   results: null,
   currentAlgo: "ga",
@@ -1260,11 +1261,29 @@ const SOFT_CONSTRAINTS = [
     desc: "Physical Education and elective subjects after midday",
   },
   {
+    id: "mapehNotFirstOrFriday",
+    name: "MAPEH Avoid P1 & Friday",
+    desc: "Prefer Music, Art, PE, and Health away from first period and Fridays",
+  },
+  {
     id: "minTeacherIdle",
     name: "Minimize Teacher Idle Time",
     desc: "Cluster a teacher's periods to reduce gaps in their schedule",
   },
 ];
+
+function isMapehSubject(sub) {
+  if (!sub) return false;
+  const text = `${sub.name || ""} ${sub.code || ""}`.toLowerCase();
+  return (
+    text.includes("mapeh") ||
+    text.includes("music") ||
+    text.includes("art") ||
+    text.includes("pe") ||
+    text.includes("physical") ||
+    text.includes("health")
+  );
+}
 
 function renderConstraints() {
   document.getElementById("hard-constraints").innerHTML = HARD_CONSTRAINTS.map(
@@ -1426,9 +1445,9 @@ async function rerollUnfrozen() {
   btn.textContent = "↻ Rerolling...";
   await sleep(20);
   let res;
-  if (state.currentAlgo === "ga") res = runGA();
-  else if (state.currentAlgo === "sa") res = runSA();
-  else res = runCP();
+  if (state.currentAlgo === "ga") res = await runGA();
+  else if (state.currentAlgo === "sa") res = await runSA();
+  else res = await runCP();
   const hard = countHardViolations(res.sched);
   const soft = countSoftViolations(res.sched);
   state.results = {
@@ -1646,7 +1665,8 @@ function alignSameGradeDays(ms) {
 // Returns number of (section, subject, day) mismatches vs ref.
 // ═══════════════════════════════════════════════════════
 function countSameDayViolations(ms) {
-  if (!state.constraints.sameDayGrade && !state.constraints.sameDayGradeSoft) return 0;
+  if (!state.constraints.sameDayGrade && !state.constraints.sameDayGradeSoft)
+    return 0;
   const { numDays } = state.school;
   let violations = 0;
 
@@ -1738,7 +1758,7 @@ function fitnessMS(ms) {
             teacherSlots[tid] = Array.from({ length: numDays }, () =>
               new Array(periodsPerDay).fill(null),
             );
-          if (teacherSlots[tid][d][p] !== null) score -= (HW * 100);
+          if (teacherSlots[tid][d][p] !== null) score -= HW * 100;
           else teacherSlots[tid][d][p] = s.id;
         }
         const rid = sub.roomId || s.roomId;
@@ -1848,6 +1868,20 @@ function fitnessMS(ms) {
         score -= perDay.reduce((a, v) => a + Math.abs(v - avg), 0) * SW * 0.5;
       });
     }
+
+    if (state.constraints.mapehNotFirstOrFriday) {
+      for (let d = 0; d < numDays; d++) {
+        const dayPeriods = getPeriodsForDay(d, g);
+        for (let p = 0; p < dayPeriods; p++) {
+          const si = sch[d][p];
+          if (si === null || si === undefined) continue;
+          const sub = s.subjects[si];
+          if (!isMapehSubject(sub)) continue;
+          if (p === 0) score -= SW * 2;
+          if (d === 4) score -= SW * 3;
+        }
+      }
+    }
   });
 
   // All periods placed
@@ -1877,7 +1911,7 @@ function fitnessMS(ms) {
           for (let p = 0; p < dayPeriods; p++) {
             if (sch[d][p] === si) count++;
           }
-          if (count > 1) score -= (HW * 5) * (count - 1);
+          if (count > 1) score -= HW * 5 * (count - 1);
         }
       }
     });
@@ -1958,22 +1992,42 @@ function mutateMS(ms) {
   const classes = getAllClasses();
   if (classes.length === 0) return s;
   const cls = classes[Math.floor(Math.random() * classes.length)];
-  const { numDays, periodsPerDay } = state.school;
   const sch = s[cls.section.id];
   if (!sch) return s;
   const fz = state.frozen[cls.section.id] || {};
-  const slots = [];
-  for (let d = 0; d < numDays; d++) {
-    const dp = getPeriodsForDay(d, cls.grade);
-    for (let p = 0; p < dp; p++) if (!fz[`${d}_${p}`]) slots.push([d, p]);
-  }
-  if (slots.length < 2) return s;
-  const [a, b] = [
-    slots[Math.floor(Math.random() * slots.length)],
-    slots[Math.floor(Math.random() * slots.length)],
-  ];
+  const a = pickRandomMutableSlot(cls.grade, fz, null);
+  if (!a) return s;
+  const b = pickRandomMutableSlot(cls.grade, fz, `${a[0]}_${a[1]}`);
+  if (!b) return s;
   [sch[a[0]][a[1]], sch[b[0]][b[1]]] = [sch[b[0]][b[1]], sch[a[0]][a[1]]];
   return s;
+}
+
+function pickRandomMutableSlot(grade, frozenMap, excludeKey) {
+  const { numDays } = state.school;
+
+  // Fast random probing reduces allocations during high-iteration SA runs.
+  for (let tries = 0; tries < 24; tries++) {
+    const d = Math.floor(Math.random() * numDays);
+    const dp = getPeriodsForDay(d, grade);
+    const p = Math.floor(Math.random() * dp);
+    const k = `${d}_${p}`;
+    if (!frozenMap[k] && k !== excludeKey) return [d, p];
+  }
+
+  // Reservoir fallback keeps memory O(1) and still samples uniformly.
+  let chosen = null;
+  let seen = 0;
+  for (let d = 0; d < numDays; d++) {
+    const dp = getPeriodsForDay(d, grade);
+    for (let p = 0; p < dp; p++) {
+      const k = `${d}_${p}`;
+      if (frozenMap[k] || k === excludeKey) continue;
+      seen++;
+      if (Math.random() < 1 / seen) chosen = [d, p];
+    }
+  }
+  return chosen;
 }
 
 function crossoverMS(a, b) {
@@ -2061,39 +2115,178 @@ function runGA() {
 }
 
 // ─── SA ───
-function runSA() {
-  let temp = parseInt(document.getElementById("sa-temp").value);
+async function runSA() {
+  const temp = parseInt(document.getElementById("sa-temp").value);
   const cool = parseInt(document.getElementById("sa-cool").value) / 100;
   const iters = parseInt(document.getElementById("sa-iter").value);
-  addLog("i", `[SA] T0:${temp} α:${cool} Iter:${iters}`);
-  let cur = repairMS(randomMultiSchedule());
-  let curF = fitnessMS(cur);
-  let best = cloneMS(cur),
-    bestF = curF;
+  const batchSize = 1000;
+  const swapEvery = Math.max(1, Math.floor(iters * 0.1));
+  const stagnationThreshold = Math.max(1000, Math.floor(iters * 0.03));
+  const sampleEvery = Math.max(1, Math.floor(iters / 2000));
+
+  addLog(
+    "i",
+    `[SA] Multi-Chain mode · T0:${temp} α:${cool} Iter:${iters} Batch:${batchSize}`,
+  );
+
+  const chainA = {
+    id: "A",
+    temp,
+    cur: repairMS(randomMultiSchedule()),
+    curF: 0,
+    best: null,
+    bestF: -Infinity,
+    iter: 0,
+    stagnation: 0,
+  };
+  chainA.curF = fitnessMS(chainA.cur);
+  chainA.best = cloneMS(chainA.cur);
+  chainA.bestF = chainA.curF;
+
+  const chainB = {
+    id: "B",
+    temp: Math.max(1, Math.round(temp * 1.8)),
+    cur: repairMS(randomMultiSchedule()),
+    curF: 0,
+    best: null,
+    bestF: -Infinity,
+    iter: 0,
+    stagnation: 0,
+  };
+  chainB.curF = fitnessMS(chainB.cur);
+  chainB.best = cloneMS(chainB.cur);
+  chainB.bestF = chainB.curF;
+
+  let globalBest =
+    chainA.bestF >= chainB.bestF ? cloneMS(chainA.best) : cloneMS(chainB.best);
+  let globalBestF = Math.max(chainA.bestF, chainB.bestF);
+
   state.fitnessHistory = [];
-  for (let i = 0; i < iters; i++) {
-    const nb = repairMS(mutateMS(cur));
-    const nbF = fitnessMS(nb);
-    const d = nbF - curF;
-    if (d > 0 || Math.random() < Math.exp(d / temp)) {
-      cur = nb;
-      curF = nbF;
+  let doneTotal = 0;
+  const targetTotal = iters * 2;
+  let nextHeartbeat = 5000;
+
+  while (chainA.iter < iters || chainB.iter < iters) {
+    const stepA = Math.min(batchSize, Math.max(0, iters - chainA.iter));
+    for (let n = 0; n < stepA; n++) {
+      const nb = repairMS(mutateMS(chainA.cur));
+      const nbF = fitnessMS(nb);
+      const d = nbF - chainA.curF;
+
+      if (d > 0 || Math.random() < Math.exp(d / Math.max(1, chainA.temp))) {
+        chainA.cur = nb;
+        chainA.curF = nbF;
+      }
+
+      if (chainA.curF > chainA.bestF) {
+        chainA.best = cloneMS(chainA.cur);
+        chainA.bestF = chainA.curF;
+        chainA.stagnation = 0;
+      } else {
+        chainA.stagnation++;
+      }
+
+      const adaptiveCoolA =
+        chainA.stagnation >= stagnationThreshold
+          ? Math.min(0.9995, cool + 0.02)
+          : cool;
+      chainA.temp *= adaptiveCoolA;
+      chainA.iter++;
+      doneTotal++;
+
+      if (chainA.iter % sampleEvery === 0)
+        pushFitnessSample(Math.max(chainA.bestF, chainB.bestF));
     }
-    if (curF > bestF) {
-      best = cloneMS(cur);
-      bestF = curF;
+
+    const stepB = Math.min(batchSize, Math.max(0, iters - chainB.iter));
+    for (let n = 0; n < stepB; n++) {
+      const nb = repairMS(mutateMS(chainB.cur));
+      const nbF = fitnessMS(nb);
+      const d = nbF - chainB.curF;
+
+      if (d > 0 || Math.random() < Math.exp(d / Math.max(1, chainB.temp))) {
+        chainB.cur = nb;
+        chainB.curF = nbF;
+      }
+
+      if (chainB.curF > chainB.bestF) {
+        chainB.best = cloneMS(chainB.cur);
+        chainB.bestF = chainB.curF;
+        chainB.stagnation = 0;
+      } else {
+        chainB.stagnation++;
+      }
+
+      const adaptiveCoolB =
+        chainB.stagnation >= stagnationThreshold
+          ? Math.min(0.9995, cool + 0.02)
+          : cool;
+      chainB.temp *= adaptiveCoolB;
+      chainB.iter++;
+      doneTotal++;
+
+      if (chainB.iter % sampleEvery === 0)
+        pushFitnessSample(Math.max(chainA.bestF, chainB.bestF));
     }
-    temp *= cool;
-    state.fitnessHistory.push(bestF);
-    if (i % Math.ceil(iters / 8) === 0) {
-      updateProg(
-        Math.round((i / iters) * 100),
-        `Iter ${i}/${iters} · T:${temp.toFixed(0)} Fit:${bestF.toFixed(0)}`,
+
+    if (chainA.bestF > globalBestF || chainB.bestF > globalBestF) {
+      if (chainA.bestF >= chainB.bestF) {
+        globalBest = cloneMS(chainA.best);
+        globalBestF = chainA.bestF;
+      } else {
+        globalBest = cloneMS(chainB.best);
+        globalBestF = chainB.bestF;
+      }
+    }
+
+    if (chainA.iter > 0 && chainB.iter > 0) {
+      const ckptA = chainA.iter % swapEvery === 0;
+      const ckptB = chainB.iter % swapEvery === 0;
+      if (ckptA || ckptB) {
+        if (chainA.bestF > chainB.bestF) {
+          chainB.best = cloneMS(chainA.best);
+          chainB.bestF = chainA.bestF;
+          chainB.cur = cloneMS(chainA.best);
+          chainB.curF = chainA.bestF;
+          chainB.stagnation = 0;
+          addLog(
+            "",
+            `[SA] Swap A→B at ${Math.max(chainA.iter, chainB.iter)} · f=${chainA.bestF.toFixed(0)}`,
+          );
+        } else if (chainB.bestF > chainA.bestF) {
+          chainA.best = cloneMS(chainB.best);
+          chainA.bestF = chainB.bestF;
+          chainA.cur = cloneMS(chainB.best);
+          chainA.curF = chainB.bestF;
+          chainA.stagnation = 0;
+          addLog(
+            "",
+            `[SA] Swap B→A at ${Math.max(chainA.iter, chainB.iter)} · f=${chainB.bestF.toFixed(0)}`,
+          );
+        }
+      }
+    }
+
+    while (doneTotal >= nextHeartbeat) {
+      const memTxt = formatHeapUsage();
+      const lead = chainA.bestF >= chainB.bestF ? "A" : "B";
+      addLog(
+        "",
+        `[SA][HB] iter:${doneTotal}/${targetTotal} mem:${memTxt} best:${globalBestF.toFixed(0)} lead:${lead} TA:${chainA.temp.toFixed(0)} TB:${chainB.temp.toFixed(0)}`,
       );
-      addLog("", `[SA] ${i}: T=${temp.toFixed(0)} f=${bestF.toFixed(0)}`);
+      nextHeartbeat += 5000;
     }
+
+    updateProg(
+      Math.round((doneTotal / targetTotal) * 100),
+      `Iter ${doneTotal}/${targetTotal} · A:${chainA.bestF.toFixed(0)} B:${chainB.bestF.toFixed(0)} Best:${globalBestF.toFixed(0)}`,
+    );
+
+    await yieldToMainThread();
   }
-  return { sched: best, fitness: bestF };
+
+  if (state.fitnessHistory.length < 2) pushFitnessSample(globalBestF);
+  return { sched: globalBest, fitness: globalBestF };
 }
 
 // ─── CP ───
@@ -2175,9 +2368,9 @@ async function startGeneration() {
   );
   await sleep(20);
   let res;
-  if (state.currentAlgo === "ga") res = runGA();
-  else if (state.currentAlgo === "sa") res = runSA();
-  else res = runCP();
+  if (state.currentAlgo === "ga") res = await runGA();
+  else if (state.currentAlgo === "sa") res = await runSA();
+  else res = await runCP();
   const elapsed = Date.now() - t0;
   updateProg(100, "Complete!");
   const hard = countHardViolations(res.sched);
@@ -2446,6 +2639,31 @@ function collectConflicts(ms) {
     });
   }
 
+  // 7b. MAPEH preferred away from first period and Friday
+  if (state.constraints.mapehNotFirstOrFriday) {
+    classes.forEach(({ grade: g, section: s }) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          const si = sch[d][p];
+          if (si === null || si === undefined) continue;
+          const sub = s.subjects[si];
+          if (!isMapehSubject(sub)) continue;
+          if (p === 0 || d === 4) {
+            conflicts.push({
+              severity: "soft",
+              type: "MAPEH Placement",
+              desc: `<strong>${sub.name}</strong> is placed ${p === 0 ? "in first period" : "on Friday"} (soft preference is to avoid both)`,
+              loc: `${g.label} ${s.name} · ${DAYS_S[d]} P${p + 1}`,
+            });
+          }
+        }
+      }
+    });
+  }
+
   // ── NEW: One Period Per Day Max ──
   if (state.constraints.onePeriodPerDay) {
     classes.forEach(({ grade: g, section: s }) => {
@@ -2678,7 +2896,7 @@ function countHardViolations(ms) {
           const dp = getPeriodsForDay(d, g);
           let count = 0;
           for (let p = 0; p < dp; p++) if (sch[d][p] === si) count++;
-          if (count > 1) v += (count - 1);
+          if (count > 1) v += count - 1;
         }
       }
     });
@@ -2736,6 +2954,20 @@ function countSoftViolations(ms) {
         clock += dur;
         const brk = breaks.find((b) => b.afterPeriod === p + 1);
         if (brk) clock += brk.duration;
+      }
+    }
+
+    if (state.constraints.mapehNotFirstOrFriday) {
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          const si = sch[d][p];
+          if (si === null || si === undefined) continue;
+          const sub = s.subjects[si];
+          if (!isMapehSubject(sub)) continue;
+          if (p === 0) v++;
+          if (d === 4) v++;
+        }
       }
     }
   });
@@ -3262,6 +3494,30 @@ function shuffleArr(a) {
 }
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function pushFitnessSample(fit) {
+  state.fitnessHistory.push(fit);
+  if (state.fitnessHistory.length > 4000) {
+    state.fitnessHistory = state.fitnessHistory.filter((_, i) => i % 2 === 0);
+  }
+}
+
+function formatHeapUsage() {
+  const perf = typeof performance !== "undefined" ? performance : null;
+  if (!perf || !perf.memory || !Number.isFinite(perf.memory.usedJSHeapSize))
+    return "n/a";
+  return `${(perf.memory.usedJSHeapSize / 1024 / 1024).toFixed(1)}MB`;
+}
+
+async function yieldToMainThread() {
+  if (typeof requestIdleCallback === "function") {
+    await new Promise((resolve) =>
+      requestIdleCallback(() => resolve(), { timeout: 30 }),
+    );
+    return;
+  }
+  await sleep(0);
 }
 
 // ═══════════════════════════════════════════════════════
