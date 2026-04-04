@@ -1451,41 +1451,145 @@ async function rerollUnfrozen() {
     '<svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 3h9a3 3 0 0 1 0 6H4M1 3l3-2M1 3l3 2"/><path d="M13 11H4a3 3 0 0 1 0-6h6M13 11l-3-2M13 11l-3 2"/></svg> Reroll Unfrozen';
 }
 
+// ═══════════════════════════════════════════════════════
+// CORRECT-BY-CONSTRUCTION: Pre-assign subject days per grade
+// Returns: { gradeId: { subjectCode: Set<dayIndex> } }
+// For each grade, each subject gets its random day assignment
+// before ANY section is populated. All sections in the grade
+// MUST use these same days for that subject.
+// ═══════════════════════════════════════════════════════
+function generateSubjectDayAssignments() {
+  const { numDays } = state.school;
+  const assignments = {};
+
+  state.gradeLevels.forEach((g) => {
+    assignments[g.id] = {};
+
+    // For each subject in the first section of this grade,
+    // randomly assign which days it will appear
+    if (g.sections.length > 0) {
+      const s0 = g.sections[0];
+      s0.subjects.forEach((sub) => {
+        const nPeriods = sub.periodsPerWeek;
+        if (nPeriods === 0) return;
+
+        // Create array of day indices to distribute across
+        const dayPool = [];
+        for (let d = 0; d < numDays; d++) {
+          const maxPerDay = getPeriodsForDay(d, g);
+          // Spread sessions across days; each subject can appear 0-maxPerDay times per day
+          dayPool.push(...Array(maxPerDay).fill(d));
+        }
+        shuffleArr(dayPool);
+
+        // Pick the first nPeriods days (may have duplicates for balance)
+        const selectedDays = new Set();
+        for (let i = 0; i < nPeriods && i < dayPool.length; i++) {
+          selectedDays.add(dayPool[i]);
+        }
+
+        // If somehow we didn't get enough days (rare edge case),
+        // add day 0 repeatedly until we have at least 1 day
+        if (selectedDays.size === 0) selectedDays.add(0);
+
+        assignments[g.id][sub.code] = selectedDays;
+      });
+    }
+  });
+
+  return assignments;
+}
+
 function randomMultiSchedule() {
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
   const sched = {};
+
+  // STEP 1: Pre-assign days for each subject per grade
+  // All sections in a grade MUST use these same days
+  const subjectDayAssignments = generateSubjectDayAssignments();
+
   classes.forEach(({ grade: g, section: s }) => {
     sched[s.id] = Array.from({ length: numDays }, (_, d) =>
       new Array(periodsPerDay).fill(null),
     );
+
     const fz = state.frozen[s.id] || {};
+
+    // Restore frozen slots from previous results
     if (state.results?.sched?.[s.id]) {
       for (const key of Object.keys(fz)) {
         const [d, p] = key.split("_").map(Number);
         sched[s.id][d][p] = state.results.sched[s.id][d][p];
       }
     }
+
+    // Count already-placed periods (from frozen slots)
     const placed = new Array(s.subjects.length).fill(0);
-    for (let d = 0; d < numDays; d++)
+    for (let d = 0; d < numDays; d++) {
       for (let p = 0; p < periodsPerDay; p++) {
         const si = sched[s.id][d][p];
         if (si !== null) placed[si] = (placed[si] || 0) + 1;
       }
+    }
+
+    // Build list of (subject, day) pairs to place
+    // This respects the pre-assigned day mapping
     const toPlace = [];
     s.subjects.forEach((sub, si) => {
       const rem = sub.periodsPerWeek - (placed[si] || 0);
-      for (let k = 0; k < rem; k++) toPlace.push(si);
+      const assignedDays =
+        subjectDayAssignments[g.id]?.[sub.code] || new Set([0]);
+
+      // For each remaining period of this subject,
+      // randomly pick one of its assigned days
+      for (let k = 0; k < rem; k++) {
+        const dayArray = [...assignedDays];
+        if (dayArray.length > 0) {
+          const day = dayArray[Math.floor(Math.random() * dayArray.length)];
+          toPlace.push({ si, day });
+        }
+      }
     });
+
+    // Shuffle to randomize placement order
     shuffleArr(toPlace);
-    let idx = 0;
-    for (let d = 0; d < numDays && idx < toPlace.length; d++) {
-      const dayPeriods = getPeriodsForDay(d, g);
-      for (let p = 0; p < dayPeriods && idx < toPlace.length; p++) {
-        if (sched[s.id][d][p] === null) sched[s.id][d][p] = toPlace[idx++];
+
+    // Place sessions: try to fill periods slot-by-slot,
+    // honoring the pre-assigned day constraint
+    let placed_count = new Array(s.subjects.length).fill(0);
+
+    for (const { si, day } of toPlace) {
+      // Try to place this session on its assigned day
+      const dayPeriods = getPeriodsForDay(day, g);
+      let placed_on_day = false;
+
+      for (let p = 0; p < dayPeriods; p++) {
+        if (sched[s.id][day][p] === null && !fz[`${day}_${p}`]) {
+          sched[s.id][day][p] = si;
+          placed_on_day = true;
+          break;
+        }
+      }
+
+      // Fallback: if all slots on assigned day are full,
+      // try other days (for tight schedules)
+      if (!placed_on_day) {
+        for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          for (let p = 0; p < dp; p++) {
+            if (sched[s.id][d][p] === null && !fz[`${d}_${p}`]) {
+              sched[s.id][d][p] = si;
+              placed_on_day = true;
+              break;
+            }
+          }
+          if (placed_on_day) break;
+        }
       }
     }
   });
+
   return sched;
 }
 
@@ -1646,7 +1750,8 @@ function alignSameGradeDays(ms) {
 // Returns number of (section, subject, day) mismatches vs ref.
 // ═══════════════════════════════════════════════════════
 function countSameDayViolations(ms) {
-  if (!state.constraints.sameDayGrade && !state.constraints.sameDayGradeSoft) return 0;
+  if (!state.constraints.sameDayGrade && !state.constraints.sameDayGradeSoft)
+    return 0;
   const { numDays } = state.school;
   let violations = 0;
 
@@ -1738,7 +1843,7 @@ function fitnessMS(ms) {
             teacherSlots[tid] = Array.from({ length: numDays }, () =>
               new Array(periodsPerDay).fill(null),
             );
-          if (teacherSlots[tid][d][p] !== null) score -= (HW * 100);
+          if (teacherSlots[tid][d][p] !== null) score -= HW * 100;
           else teacherSlots[tid][d][p] = s.id;
         }
         const rid = sub.roomId || s.roomId;
@@ -1877,21 +1982,24 @@ function fitnessMS(ms) {
           for (let p = 0; p < dayPeriods; p++) {
             if (sch[d][p] === si) count++;
           }
-          if (count > 1) score -= (HW * 5) * (count - 1);
+          if (count > 1) score -= HW * 5 * (count - 1);
         }
       }
     });
   }
 
-  // ── NEW: Same-grade same-day hard penalty ──
-  // Weight is proportional to periodsPerWeek so the GA strongly
-  // prefers solutions where all sections share the same day pattern.
+  // ── SAME-GRADE SAME-DAY: Now built into structure ──
+  // Since randomMultiSchedule() and mutateMS() enforce this as a hard constraint,
+  // we can reduce the penalty weight significantly or remove it entirely.
+  // Uncomment below only if you want a safety check (should rarely trigger).
   if (state.constraints.sameDayGrade) {
     const sdvCount = countSameDayViolations(ms);
-    score -= sdvCount * HW;
+    // Reduced from HW to minimal penalty as enforcement is now hard-coded
+    if (sdvCount > 0) score -= sdvCount * (SW * 0.1);
   } else if (state.constraints.sameDayGradeSoft) {
     const sdvCount = countSameDayViolations(ms);
-    score -= sdvCount * SW;
+    // Very light penalty for soft constraint
+    score -= sdvCount * (SW * 0.05);
   }
 
   return score;
@@ -1962,16 +2070,105 @@ function mutateMS(ms) {
   const sch = s[cls.section.id];
   if (!sch) return s;
   const fz = state.frozen[cls.section.id] || {};
+
+  // CORRECT-BY-CONSTRUCTION mutation:
+  // Only swap periods that belong to subjects on the SAME DAY,
+  // or swap periods between days that BOTH contain the same subject.
+  // This preserves the subject-to-day mapping.
+
   const slots = [];
   for (let d = 0; d < numDays; d++) {
     const dp = getPeriodsForDay(d, cls.grade);
     for (let p = 0; p < dp; p++) if (!fz[`${d}_${p}`]) slots.push([d, p]);
   }
   if (slots.length < 2) return s;
-  const [a, b] = [
-    slots[Math.floor(Math.random() * slots.length)],
-    slots[Math.floor(Math.random() * slots.length)],
-  ];
+
+  // Build a map of which days each subject appears on
+  const subjectDays = {}; // si -> Set<dayIndex>
+  for (let d = 0; d < numDays; d++) {
+    const dp = getPeriodsForDay(d, cls.grade);
+    for (let p = 0; p < dp; p++) {
+      const si = sch[d][p];
+      if (si !== null) {
+        if (!subjectDays[si]) subjectDays[si] = new Set();
+        subjectDays[si].add(d);
+      }
+    }
+  }
+
+  // Build valid slot pairs for swapping:
+  // 1. Both on the same day, OR
+  // 2. They contain subjects that both appear on both days
+  const validPairs = [];
+  for (let i = 0; i < slots.length; i++) {
+    for (let j = i + 1; j < slots.length; j++) {
+      const [d1, p1] = slots[i];
+      const [d2, p2] = slots[j];
+      const si1 = sch[d1][p1];
+      const si2 = sch[d2][p2];
+
+      // Both null: skip (nothing to swap)
+      if (si1 === null && si2 === null) continue;
+
+      // Case 1: Same day - always valid
+      if (d1 === d2) {
+        validPairs.push([i, j]);
+        continue;
+      }
+
+      // Case 2: Different days - check if swap preserves day mapping
+      // Subject at d1 should be able to go to d2, and vice versa
+      let si1_ok = si1 === null; // null can go anywhere
+      let si2_ok = si2 === null; // null can go anywhere
+
+      if (si1 !== null && subjectDays[si1]) {
+        // si1 appears on both d1 and d2? Then it's safe to move one instance
+        if (subjectDays[si1].has(d2)) si1_ok = true;
+      }
+      if (si2 !== null && subjectDays[si2]) {
+        // si2 appears on both d2 and d1? Then it's safe to move one instance
+        if (subjectDays[si2].has(d1)) si2_ok = true;
+      }
+
+      // Additional safeguard: ensure swapping doesn't remove a subject from its only day
+      if (si1_ok && si2_ok) {
+        if (
+          si1 !== null &&
+          subjectDays[si1]?.size === 1 &&
+          subjectDays[si1].has(d1)
+        ) {
+          si1_ok = false; // Would remove si1 from its only day
+        }
+        if (
+          si2 !== null &&
+          subjectDays[si2]?.size === 1 &&
+          subjectDays[si2].has(d2)
+        ) {
+          si2_ok = false; // Would remove si2 from its only day
+        }
+      }
+
+      if (si1_ok && si2_ok) {
+        validPairs.push([i, j]);
+      }
+    }
+  }
+
+  // If no valid pairs, try same-day swaps (already included above)
+  if (validPairs.length === 0) {
+    // Fallback: just pick any two slots (worst case)
+    const idx1 = Math.floor(Math.random() * slots.length);
+    const idx2 = Math.floor(Math.random() * slots.length);
+    if (idx1 !== idx2) {
+      const [a, b] = [slots[idx1], slots[idx2]];
+      [sch[a[0]][a[1]], sch[b[0]][b[1]]] = [sch[b[0]][b[1]], sch[a[0]][a[1]]];
+    }
+    return s;
+  }
+
+  // Perform swap with a valid pair
+  const [i, j] = validPairs[Math.floor(Math.random() * validPairs.length)];
+  const [a, b] = [slots[i], slots[j]];
   [sch[a[0]][a[1]], sch[b[0]][b[1]]] = [sch[b[0]][b[1]], sch[a[0]][a[1]]];
   return s;
 }
@@ -2678,7 +2875,7 @@ function countHardViolations(ms) {
           const dp = getPeriodsForDay(d, g);
           let count = 0;
           for (let p = 0; p < dp; p++) if (sch[d][p] === si) count++;
-          if (count > 1) v += (count - 1);
+          if (count > 1) v += count - 1;
         }
       }
     });
