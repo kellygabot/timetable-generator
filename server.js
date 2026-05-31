@@ -29,7 +29,12 @@ const server = app.listen(PORT, async () => {
 
   // This creates the automated localtunnel link
   try {
-    const tunnel = await localtunnel({ port: PORT });
+    // Pass your desired custom name to the subdomain property
+    const tunnel = await localtunnel({ 
+      port: PORT, 
+      subdomain: "timetable-generator" // 👈 Change this to your preferred URL prefix
+    });
+    
     console.log(`Public Link (localtunnel): ${tunnel.url}`);
 
     tunnel.on("close", () => {
