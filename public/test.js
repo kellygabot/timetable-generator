@@ -1053,11 +1053,13 @@ function renderClassEditor() {
                 <span class="subj-code sc${sub.color % 10}" style="padding:3px 8px;border-radius:4px">${sub.code}</span>
                 <span class="subj-name">${sub.name}</span>
                 ${sub.isSynced ? `<span class="subj-meta" style="color:var(--accent-c)">🔗 Synced</span>` : ""}
+                ${sub.unavailability && sub.unavailability.length > 0 ? `<span class="subj-meta" style="color:var(--accent-r)">⏰ Restricted</span>` : ""}
                 <span class="subj-meta">${sub.periodsPerWeek}×/wk</span>
                 <span class="subj-meta">${sub.durationMinutes || 50}min</span>
                 <span class="subj-meta" style="${tids.length > 1 ? "color:var(--accent-y)" : ""}">${tids.length > 1 ? "👥 " : ""}${teacherNames(sub)}</span>
                 ${subRoom ? `<span class="subj-meta" style="color:var(--accent-p)">📍${subRoom.name}</span>` : ""}
                 <button class="btn btn-ghost btn-sm" onclick="editSubjectFromClass(${i})" title="Edit subject">✏</button>
+                <button class="btn btn-ghost btn-sm" onclick="openSubjectUnavailModal('${selectedClassId}', ${i})" title="Set unavailability">⏰</button>
                 <button class="btn btn-danger" onclick="removeSubjectFromClass(${i})">✕</button>
               </div>`;
                 })
@@ -1083,6 +1085,108 @@ function editSubjectFromClass(idx) {
 
 function cancelSubjectEdit() {
   editingSubjectIdx = null;
+  renderClassEditor();
+}
+
+let pendingSubjectBlocks = [];
+let editingSubjectInfo = null;
+
+function openSubjectUnavailModal(classId, subIdx) {
+  editingSubjectInfo = { classId, subIdx };
+  const found = findClass(classId);
+  if (!found) return;
+  const sub = found.section.subjects[subIdx];
+  if (!sub) return;
+  document.getElementById("subjectUnavailModalTitle").textContent = `Unavailability — ${sub.code} (${sub.name})`;
+  pendingSubjectBlocks = (sub.unavailability || []).map((b) => ({
+    ...b,
+    days: [...b.days],
+  }));
+  renderSubjectUnavailBlocks();
+  document.getElementById("subjectUnavailModal").classList.add("open");
+}
+
+function renderSubjectUnavailBlocks() {
+  const container = document.getElementById("subjectUnavailBlocks");
+  const empty = document.getElementById("subjectUnavailEmpty");
+  if (pendingSubjectBlocks.length === 0) {
+    container.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  container.innerHTML = pendingSubjectBlocks
+    .map(
+      (b, i) => `
+    <div class="avail-block">
+      <div><label>Type</label>
+        <select onchange="pendingSubjectBlocks[${i}].type=this.value" style="width:100%">
+          <option value="unavailable" ${b.type === "unavailable" ? "selected" : ""}>🚫 Cannot schedule</option>
+          <option value="preferred_off" ${b.type === "preferred_off" ? "selected" : ""}>😓 Prefers off</option>
+        </select></div>
+      <div><label>From</label><input type="time" value="${b.fromTime}" onchange="pendingSubjectBlocks[${i}].fromTime=this.value" style="width:100%"></div>
+      <div><label>To</label><input type="time" value="${b.toTime}" onchange="pendingSubjectBlocks[${i}].toTime=this.value" style="width:100%"></div>
+      <div style="align-self:end"><button class="btn btn-danger btn-sm" onclick="removeSubjectUnavailBlock(${i})">✕</button></div>
+      <div style="grid-column:1/-1"><label>Days</label>
+        <div class="day-check-row">
+          ${dayNames
+            .map(
+              (d, di) => `
+            <input type="checkbox" class="day-check" id="sdc_${i}_${di}" ${b.days.includes(di) ? "checked" : ""} onchange="toggleSubjectDay(${i},${di},this.checked)">
+            <label for="sdc_${i}_${di}">${d}</label>`,
+            )
+            .join("")}
+        </div>
+      </div>
+    </div>`,
+    )
+    .join("");
+}
+
+function addSubjectUnavailBlock() {
+  pendingSubjectBlocks.push({
+    type: "unavailable",
+    days: [0, 1, 2, 3, 4],
+    fromTime: "14:00",
+    toTime: "15:00",
+  });
+  renderSubjectUnavailBlocks();
+}
+
+function removeSubjectUnavailBlock(i) {
+  pendingSubjectBlocks.splice(i, 1);
+  renderSubjectUnavailBlocks();
+}
+
+function toggleSubjectDay(blockIdx, dayIdx, checked) {
+  const b = pendingSubjectBlocks[blockIdx];
+  if (checked) {
+    if (!b.days.includes(dayIdx)) b.days.push(dayIdx);
+  } else b.days = b.days.filter((d) => d !== dayIdx);
+}
+
+function saveSubjectUnavailability() {
+  if (!editingSubjectInfo) return;
+  const { classId, subIdx } = editingSubjectInfo;
+  const found = findClass(classId);
+  if (!found) return;
+  const sub = found.section.subjects[subIdx];
+  if (!sub) return;
+
+  for (const b of pendingSubjectBlocks) {
+    if (t2m(b.toTime) <= t2m(b.fromTime)) {
+      alert(`Block invalid: "To" time must be after "From" time.`);
+      return;
+    }
+    if (b.days.length === 0) {
+      alert(`Each block must have at least one day selected.`);
+      return;
+    }
+  }
+
+  sub.unavailability = pendingSubjectBlocks.map((b) => ({ ...b, days: [...b.days] }));
+  closeModal("subjectUnavailModal");
   renderClassEditor();
 }
 
@@ -1157,6 +1261,7 @@ function addSubjectToClass() {
       teacherId: teacherIds[0] || "",
       roomId: roomId || null,
       isSynced: false,
+      unavailability: [],
       color: colorCounter++ % 10,
     });
   }
@@ -1982,6 +2087,7 @@ function fitnessMS(ms) {
             : null;
         const dur = sub ? sub.durationMinutes || 50 : 50;
         if (sub) {
+          // Check teacher availability
           const tids = getTeacherIds(sub);
           for (const tid of tids) {
             const teacher = state.teachers.find((t) => t.id === tid);
@@ -1994,6 +2100,19 @@ function fitnessMS(ms) {
                 if (clock < bTo && pEnd > bFrom) {
                   score -= block.type === "unavailable" ? SW * 3 : SW;
                 }
+              }
+            }
+          }
+
+          // Check subject availability
+          if (sub?.unavailability?.length) {
+            const pEnd = clock + dur;
+            for (const block of sub.unavailability) {
+              if (!block.days.includes(d)) continue;
+              const bFrom = t2m(block.fromTime),
+                bTo = t2m(block.toTime);
+              if (clock < bTo && pEnd > bFrom) {
+                score -= block.type === "unavailable" ? SW * 3 : SW;
               }
             }
           }
@@ -2153,8 +2272,29 @@ function repairMS(ms) {
         const empties = [];
         for (let d = 0; d < numDays; d++) {
           const dp = getPeriodsForDay(d, g);
+          // Calculate actual clock times for each period on this day
+          const breaks = g && g.breaks ? g.breaks : state.school.breaks;
+          let clock = t2m(state.school.startTime);
+          const dur = sub.durationMinutes || 50;
           for (let p = 0; p < dp; p++) {
-            if (sch[d][p] === null && !fz[`${d}_${p}`]) empties.push([d, p]);
+            if (sch[d][p] === null && !fz[`${d}_${p}`]) {
+              // Check if this slot violates subject unavailability constraints
+              const pEnd = clock + dur;
+              let blocked = false;
+              for (const block of sub.unavailability || []) {
+                if (block.days.includes(d)) {
+                  const bFrom = t2m(block.fromTime), bTo = t2m(block.toTime);
+                  if (clock < bTo && pEnd > bFrom) {
+                    blocked = true;
+                    break;
+                  }
+                }
+              }
+              if (!blocked) empties.push([d, p]);
+            }
+            clock += dur;
+            const brk = breaks.find((b) => b.afterPeriod === p + 1);
+            if (brk) clock += brk.duration;
           }
         }
         if (empties.length > 0) {
@@ -2752,6 +2892,7 @@ function collectConflicts(ms) {
             : null;
         const dur = sub ? sub.durationMinutes || 50 : 50;
         if (sub) {
+          // Check teacher availability
           const tids = getTeacherIds(sub);
           for (const tid of tids) {
             const teacher = state.teachers.find((t) => t.id === tid);
@@ -2774,6 +2915,29 @@ function collectConflicts(ms) {
                   });
                   break;
                 }
+              }
+            }
+          }
+
+          // Check subject availability
+          if (sub?.unavailability?.length) {
+            const pEnd = clock + dur;
+            for (const block of sub.unavailability) {
+              if (!block.days.includes(d)) continue;
+              const bFrom = t2m(block.fromTime),
+                bTo = t2m(block.toTime);
+              if (clock < bTo && pEnd > bFrom) {
+                const label =
+                  block.type === "unavailable"
+                    ? "🚫 Not allowed"
+                    : "😓 Prefers off";
+                conflicts.push({
+                  severity: "avail",
+                  type: "Subject Unavailability",
+                  desc: `<strong>${sub.name}</strong> scheduled during blocked time (${label}: ${block.fromTime}–${block.toTime})`,
+                  loc: `${g.label} ${s.name} · ${DAYS_S[d]} P${p + 1}`,
+                });
+                break;
               }
             }
           }

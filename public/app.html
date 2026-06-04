@@ -756,6 +756,27 @@
       </div>
     </div>
 
+    <div class="modal-overlay" id="subjectUnavailModal">
+      <div class="modal" style="width:580px;max-width:98vw">
+        <div class="modal-title" id="subjectUnavailModalTitle">Subject Unavailability</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:16px;line-height:1.6;padding:10px 12px;background:var(--s3);border-radius:var(--r-sm);border-left:2px solid var(--accent-r)">
+          Define times when this subject cannot be scheduled. <strong style="color:var(--accent-r)">Hard</strong> constraints are absolute; <strong style="color:var(--accent-y)">soft</strong> are penalized.
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Restriction Blocks</div>
+          <button class="btn btn-secondary btn-sm" onclick="addSubjectUnavailBlock()">+ Add Block</button>
+        </div>
+        <div id="subjectUnavailBlocks" style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;margin-bottom:12px"></div>
+        <div id="subjectUnavailEmpty" style="display:none;padding:20px;text-align:center;color:var(--text3);font-size:12px;background:var(--s3);border-radius:var(--r-sm)">
+          No restrictions — this subject can be scheduled any time.
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" onclick="closeModal('subjectUnavailModal')">Cancel</button>
+          <button class="btn btn-primary" onclick="saveSubjectUnavailability()">Save Restrictions</button>
+        </div>
+      </div>
+    </div>
+
     <script src="test.js"></script>
   </body>
 </html>
