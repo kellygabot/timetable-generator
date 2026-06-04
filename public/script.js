@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════
 // GLOBAL STATE
 // ═══════════════════════════════════════════════════════
+console.log("📋 script.js loaded with synchronized subjects support");
 const state = {
   school: {
     name: "",
@@ -1019,16 +1020,23 @@ function renderClassEditor() {
             <option value="">— Use Section Room —</option>
             ${state.rooms.map((r) => `<option value="${r.id}" ${isEditing && editSub.roomId === r.id ? "selected" : ""}>${r.name} (${r.id})</option>`).join("")}
           </select>
-        </div>`
-            : ""
-        }
+        </div>
         <div class="field" style="grid-column:1/-1">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
             <input type="checkbox" id="e-synced" ${isEditing && editSub.isSynced ? "checked" : ""}>
             <span>🔗 Synchronized across sections</span>
             <span style="font-size:10px;color:var(--text3);font-weight:400">Same day & time for all sections with this subject</span>
           </label>
-        </div>
+        </div>`
+            : `
+        <div class="field" style="grid-column:1/-1">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+            <input type="checkbox" id="e-synced" ${isEditing && editSub.isSynced ? "checked" : ""}>
+            <span>🔗 Synchronized across sections</span>
+            <span style="font-size:10px;color:var(--text3);font-weight:400">Same day & time for all sections with this subject</span>
+          </label>
+        </div>`
+        }
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary btn-sm" onclick="addSubjectToClass()">${isEditing ? "✓ Update Subject" : "+ Add Subject"}</button>

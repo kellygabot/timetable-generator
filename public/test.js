@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════
 // GLOBAL STATE
 // ═══════════════════════════════════════════════════════
+console.log("📋 test.js loaded with synchronized subjects support");
 const state = {
   school: {
     name: "",
@@ -1012,8 +1013,22 @@ function renderClassEditor() {
             <option value="">— Use Section Room —</option>
             ${state.rooms.map((r) => `<option value="${r.id}" ${isEditing && editSub.roomId === r.id ? "selected" : ""}>${r.name} (${r.id})</option>`).join("")}
           </select>
+        </div>
+        <div class="field" style="grid-column:1/-1">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+            <input type="checkbox" id="e-synced" ${isEditing && editSub.isSynced ? "checked" : ""}>
+            <span>🔗 Synchronized across sections</span>
+            <span style="font-size:10px;color:var(--text3);font-weight:400">Same day & time for all sections with this subject</span>
+          </label>
         </div>`
-            : ""
+            : `
+        <div class="field" style="grid-column:1/-1">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500">
+            <input type="checkbox" id="e-synced" ${isEditing && editSub.isSynced ? "checked" : ""}>
+            <span>🔗 Synchronized across sections</span>
+            <span style="font-size:10px;color:var(--text3);font-weight:400">Same day & time for all sections with this subject</span>
+          </label>
+        </div>`
         }
       </div>
       <div style="display:flex;gap:8px">
@@ -1037,6 +1052,7 @@ function renderClassEditor() {
                   return `<div class="subj-pill fade-up ${editingSubjectIdx === i ? "subj-editing" : ""}">
                 <span class="subj-code sc${sub.color % 10}" style="padding:3px 8px;border-radius:4px">${sub.code}</span>
                 <span class="subj-name">${sub.name}</span>
+                ${sub.isSynced ? `<span class="subj-meta" style="color:var(--accent-c)">🔗 Synced</span>` : ""}
                 <span class="subj-meta">${sub.periodsPerWeek}×/wk</span>
                 <span class="subj-meta">${sub.durationMinutes || 50}min</span>
                 <span class="subj-meta" style="${tids.length > 1 ? "color:var(--accent-y)" : ""}">${tids.length > 1 ? "👥 " : ""}${teacherNames(sub)}</span>
@@ -1101,6 +1117,7 @@ function addSubjectToClass() {
   const dur = parseInt(document.getElementById("e-dur").value) || 50;
   const roomEl = document.getElementById("e-room");
   const roomId = roomEl ? roomEl.value : "";
+  const isSynced = document.getElementById("e-synced").checked || false;
 
   const teacherChecks = document.querySelectorAll(
     'input[name="subj-teacher-check"]:checked',
@@ -1124,6 +1141,7 @@ function addSubjectToClass() {
     existing.teacherIds = teacherIds;
     existing.teacherId = teacherIds[0] || "";
     existing.roomId = roomId || null;
+    existing.isSynced = isSynced;
     editingSubjectIdx = null;
   } else {
     if (s.subjects.find((sub) => sub.code === code)) {
@@ -1138,6 +1156,7 @@ function addSubjectToClass() {
       teacherIds,
       teacherId: teacherIds[0] || "",
       roomId: roomId || null,
+      isSynced: false,
       color: colorCounter++ % 10,
     });
   }
@@ -1905,6 +1924,74 @@ function countSameDayViolations(ms) {
   return violations;
 }
 
+// ═══════════════════════════════════════════════════════
+// COUNT SYNCHRONIZED SUBJECT VIOLATIONS
+// Groups sections by synced subject and checks if they're
+// scheduled at the exact same day and period.
+// ═══════════════════════════════════════════════════════
+function countSyncedSubjectViolations(ms) {
+  const { numDays } = state.school;
+  let violations = 0;
+
+  // Build a map of synced subjects: { subjectCode -> [{ gradeLevel, section, subjectIdx }] }
+  const syncedSubjects = {};
+  state.gradeLevels.forEach((g) => {
+    g.sections.forEach((s) => {
+      s.subjects.forEach((sub, si) => {
+        if (sub.isSynced) {
+          if (!syncedSubjects[sub.code]) syncedSubjects[sub.code] = [];
+          syncedSubjects[sub.code].push({ grade: g, section: s, subjectIdx: si });
+        }
+      });
+    });
+  });
+
+  // For each synced subject, check if all sections have it at the same day/period
+  Object.entries(syncedSubjects).forEach(([code, instances]) => {
+    if (instances.length < 2) return; // Only check if 2+ sections have it
+
+    // Build ref from first instance
+    const { grade: refG, section: refS, subjectIdx: refSi } = instances[0];
+    const refSch = ms[refS.id];
+    if (!refSch) return;
+
+    const refSlots = []; // [{ day, period }]
+    for (let d = 0; d < numDays; d++) {
+      const dp = getPeriodsForDay(d, refG);
+      for (let p = 0; p < dp; p++) {
+        if (refSch[d][p] === refSi) refSlots.push({ day: d, period: p });
+      }
+    }
+
+    // Check remaining instances
+    instances.slice(1).forEach(({ grade: g, section: s, subjectIdx: si }) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+
+      const currSlots = [];
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          if (sch[d][p] === si) currSlots.push({ day: d, period: p });
+        }
+      }
+
+      // Check if slots match exactly
+      if (refSlots.length !== currSlots.length) {
+        violations += Math.abs(refSlots.length - currSlots.length);
+      } else {
+        for (let i = 0; i < refSlots.length; i++) {
+          if (refSlots[i].day !== currSlots[i].day || refSlots[i].period !== currSlots[i].period) {
+            violations++;
+          }
+        }
+      }
+    });
+  });
+
+  return violations;
+}
+
 function fitnessMS(ms) {
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
@@ -2110,6 +2197,10 @@ function fitnessMS(ms) {
     const sdvCount = countSameDayViolations(ms);
     score -= sdvCount * SW;
   }
+
+  // ── Synchronized subjects: exact same day & period for all sections ──
+  const syncViolations = countSyncedSubjectViolations(ms);
+  score -= syncViolations * HW * 10; // Heavy penalty to enforce
 
   return score;
 }
@@ -2937,6 +3028,77 @@ function collectConflicts(ms) {
       });
     });
   }
+
+  // 9. ── Synchronized subjects: same day & period ──
+  // Build map of synced subjects: { subjectCode -> [{ grade, section, si }] }
+  const syncedSubjects = {};
+  state.gradeLevels.forEach((g) => {
+    g.sections.forEach((s) => {
+      s.subjects.forEach((sub, si) => {
+        if (sub.isSynced) {
+          if (!syncedSubjects[sub.code]) syncedSubjects[sub.code] = [];
+          syncedSubjects[sub.code].push({ grade: g, section: s, si });
+        }
+      });
+    });
+  });
+
+  // Check each synced subject group
+  Object.entries(syncedSubjects).forEach(([code, instances]) => {
+    if (instances.length < 2) return; // Only if multiple sections have it
+
+    const { grade: refG, section: refS, si: refSi } = instances[0];
+    const refSch = ms[refS.id];
+    if (!refSch) return;
+
+    // Get slots from reference
+    const refSlots = [];
+    for (let d = 0; d < numDays; d++) {
+      const dp = getPeriodsForDay(d, refG);
+      for (let p = 0; p < dp; p++) {
+        if (refSch[d][p] === refSi) refSlots.push({ d, p });
+      }
+    }
+
+    // Check other instances
+    instances.slice(1).forEach(({ grade: g, section: s, si }) => {
+      const sch = ms[s.id];
+      if (!sch) return;
+
+      const currSlots = [];
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          if (sch[d][p] === si) currSlots.push({ d, p });
+        }
+      }
+
+      // Compare slots
+      if (refSlots.length !== currSlots.length) {
+        conflicts.push({
+          severity: "hard",
+          type: "Synced Subject Mismatch",
+          desc: `<strong>${code}</strong> is synchronized but different period count: ${refG.label} ${refS.name} has ${refSlots.length} sessions, ${g.label} ${s.name} has ${currSlots.length}`,
+          loc: `${code}`,
+        });
+      } else {
+        for (let i = 0; i < refSlots.length; i++) {
+          const rSlot = refSlots[i];
+          const cSlot = currSlots[i];
+          if (rSlot.d !== cSlot.d || rSlot.p !== cSlot.p) {
+            const refLoc = `${DAYS_S[rSlot.d]} P${rSlot.p + 1}`;
+            const currLoc = `${DAYS_S[cSlot.d]} P${cSlot.p + 1}`;
+            conflicts.push({
+              severity: "hard",
+              type: "Synced Subject Timing Mismatch",
+              desc: `<strong>${code}</strong> — ${refG.label} ${refS.name} at ${refLoc} but ${g.label} ${s.name} at ${currLoc}`,
+              loc: `${code}`,
+            });
+          }
+        }
+      }
+    });
+  });
 
   return conflicts;
 }
