@@ -1949,8 +1949,13 @@ function fitnessMS(ms) {
             teacherSlots[tid] = Array.from({ length: numDays }, () =>
               new Array(periodsPerDay).fill(null),
             );
-          if (teacherSlots[tid][d][p] !== null) score -= HW * 100;
-          else teacherSlots[tid][d][p] = s.id;
+          // Skip teacher conflict check for synced subjects
+          if (sub.isSynced) {
+            teacherSlots[tid][d][p] = s.id;
+          } else {
+            if (teacherSlots[tid][d][p] !== null) score -= HW * 100;
+            else teacherSlots[tid][d][p] = s.id;
+          }
         }
         const rid = sub.roomId || s.roomId;
         if (rid && state.constraints.noRoomConflict) {
@@ -2607,7 +2612,7 @@ function collectConflicts(ms) {
   const classes = getAllClasses();
   const { numDays, periodsPerDay } = state.school;
 
-  // 1. Teacher double-bookings
+  // 1. Teacher double-bookings (skip for synced subjects)
   const occ = {};
   classes.forEach(({ grade: g, section: s }) => {
     const sch = ms[s.id];
@@ -2617,6 +2622,7 @@ function collectConflicts(ms) {
         const si = sch[d][p];
         if (si === null) continue;
         const sub = s.subjects[si];
+        if (sub.isSynced) continue; // Skip synced subjects - teacher conflicts allowed
         const tids = getTeacherIds(sub);
         for (const tid of tids) {
           const key = `${tid}_${d}_${p}`;
