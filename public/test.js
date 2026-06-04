@@ -1117,7 +1117,7 @@ function addSubjectToClass() {
   const dur = parseInt(document.getElementById("e-dur").value) || 50;
   const roomEl = document.getElementById("e-room");
   const roomId = roomEl ? roomEl.value : "";
-  const isSynced = document.getElementById("e-synced").checked || false;
+  const isSynced = document.getElementById("e-synced")?.checked || false;
 
   const teacherChecks = document.querySelectorAll(
     'input[name="subj-teacher-check"]:checked',
@@ -1529,185 +1529,106 @@ function randomMultiSchedule() {
    return ((h >>> 0) % 1000) / 1e6; // 0..0.000999
  }
  
- function greedyMultiSchedule(variant = 0) {
-   const classes = getAllClasses();
-   const { numDays, periodsPerDay } = state.school;
- 
-   const sched = {};
-   const teacherOcc = new Set(); // key: tid_d_p
-   const roomOcc = new Set(); // key: rid_d_p
-   const placedByClass = {}; // classId -> placed count per subject
-   const dayUseByClass = {}; // classId -> [subject][day] count
-   const gradeRefDays = {}; // gradeId -> { subjectCode: Set<day> }
- 
-   function occupy(grade, section, si, d, p) {
-     const sub = section.subjects[si];
-     if (!sub) return;
-     const tids = getTeacherIds(sub);
-     for (const tid of tids) teacherOcc.add(`${tid}_${d}_${p}`);
-     if (state.constraints.noRoomConflict) {
-       const rid = sub.roomId || section.roomId;
-       if (rid) roomOcc.add(`${rid}_${d}_${p}`);
-     }
-   }
- 
-   function dayLoad(classId, grade, d) {
-     const dp = getPeriodsForDay(d, grade);
-     let used = 0;
-     for (let p = 0; p < dp; p++) if (sched[classId][d][p] !== null) used++;
-     return used;
-   }
- 
-   // 1) Initialize empty schedules + place frozen cells first (preserve freeze behavior)
-   classes.forEach(({ grade: g, section: s }) => {
-     sched[s.id] = Array.from({ length: numDays }, () =>
-       new Array(periodsPerDay).fill(null),
-     );
-     placedByClass[s.id] = new Array(s.subjects.length).fill(0);
-     dayUseByClass[s.id] = s.subjects.map(() => new Array(numDays).fill(0));
- 
-     const fz = state.frozen[s.id] || {};
-     if (state.results?.sched?.[s.id]) {
-       for (const key of Object.keys(fz)) {
-         const [d, p] = key.split("_").map(Number);
-         const dp = getPeriodsForDay(d, g);
-         if (d < 0 || d >= numDays || p < 0 || p >= dp) continue;
-         const si = state.results.sched[s.id][d][p];
-         if (si === null || si === undefined) continue;
-         sched[s.id][d][p] = si;
-         placedByClass[s.id][si]++;
-         dayUseByClass[s.id][si][d]++;
-         occupy(g, s, si, d, p);
-       }
-     }
-   });
- 
-   // 2) Greedy constructive placement (deterministic order)
-   classes.forEach(({ grade: g, section: s }) => {
-     const classId = s.id;
-     const fz = state.frozen[classId] || {};
-     const placed = placedByClass[classId];
-     const dayUse = dayUseByClass[classId];
- 
-     if (!gradeRefDays[g.id]) gradeRefDays[g.id] = {};
-     const refByCode = gradeRefDays[g.id];
- 
-     const remaining = s.subjects.map((sub, si) =>
-       Math.max(0, (sub.periodsPerWeek || 0) - (placed[si] || 0)),
-     );
-     const totalRem = remaining.reduce((a, b) => a + b, 0);
- 
-     for (let step = 0; step < totalRem; step++) {
-       // Pick subject with highest remaining demand + balancing pressure
-       let pickSi = -1;
-       let pickScore = -Infinity;
- 
-       for (let si = 0; si < s.subjects.length; si++) {
-         if (remaining[si] <= 0) continue;
-         const sub = s.subjects[si];
-         const avg = (sub.periodsPerWeek || 0) / Math.max(1, numDays);
-         const spreadPenalty = dayUse[si].reduce((acc, c) => acc + Math.abs(c - avg), 0);
-         const score = remaining[si] * 100 - spreadPenalty * 3 - si * 0.001;
-         if (score > pickScore) {
-           pickScore = score;
-           pickSi = si;
-         }
-       }
- 
-       if (pickSi < 0) break;
-       const sub = s.subjects[pickSi];
-       const targetDays = refByCode[sub.code];
- 
-       let best = null;
-       let bestScore = -Infinity;
- 
-       for (let d = 0; d < numDays; d++) {
-         const dp = getPeriodsForDay(d, g);
-         for (let p = 0; p < dp; p++) {
-           const k = `${d}_${p}`;
-           if (fz[k]) continue;
-           if (sched[classId][d][p] !== null) continue;
- 
-           let score = 1000;
- 
-           // Hard conflict awareness
-           const tids = getTeacherIds(sub);
-           let tConf = 0;
-           for (const tid of tids) if (teacherOcc.has(`${tid}_${d}_${p}`)) tConf++;
-           if (tConf > 0) score -= 10000 * tConf;
- 
-           if (state.constraints.noRoomConflict) {
-             const rid = sub.roomId || s.roomId;
-             if (rid && roomOcc.has(`${rid}_${d}_${p}`)) score -= 6000;
-           }
- 
-           // Day/subject balancing heuristics
-           const usedTodayForSubject = dayUse[pickSi][d];
-           score -= usedTodayForSubject * 180;
-           if (state.constraints.onePeriodPerDay && usedTodayForSubject > 0) score -= 1500;
- 
-           score -= dayLoad(classId, g, d) * 6;
- 
-           // Same-grade same-day compatibility
-           if ((state.constraints.sameDayGrade || state.constraints.sameDayGradeSoft) && targetDays && targetDays.size) {
-             score += targetDays.has(d) ? 260 : -260;
-           }
- 
-           // Deterministic tie-break
-           score -= d * 0.5 + p * 0.1;
-           score += greedyTieBreak(variant, classId, pickSi, d, p);
- 
-           if (score > bestScore) {
-             bestScore = score;
-             best = [d, p];
-           }
-         }
-       }
- 
-       // Fallback: first free mutable slot (keeps completion guaranteed)
-       if (!best) {
-         outer: for (let d = 0; d < numDays; d++) {
-           const dp = getPeriodsForDay(d, g);
-           for (let p = 0; p < dp; p++) {
-             const k = `${d}_${p}`;
-             if (!fz[k] && sched[classId][d][p] === null) {
-               best = [d, p];
-               break outer;
-             }
-           }
-         }
-       }
- 
-       if (!best) break;
-       const [bd, bp] = best;
-       sched[classId][bd][bp] = pickSi;
-       remaining[pickSi]--;
-       placed[pickSi]++;
-       dayUse[pickSi][bd]++;
-       occupy(g, s, pickSi, bd, bp);
-     }
- 
-     // Build grade reference from section[0], matching existing alignment logic
-     if (g.sections[0] && g.sections[0].id === s.id) {
-       s.subjects.forEach((sub, si) => {
-         if (!refByCode[sub.code]) refByCode[sub.code] = new Set();
-         for (let d = 0; d < numDays; d++) {
-           const dp = getPeriodsForDay(d, g);
-           for (let p = 0; p < dp; p++) {
-             if (sched[classId][d][p] === si) {
-               refByCode[sub.code].add(d);
-               break;
-             }
-           }
-         }
-       });
-     }
-   });
- 
-   // Preserve same-day grade compatibility pass
-   alignSameGradeDays(sched);
-   return sched;
- }
+// ═══════════════════════════════════════════════════════
+// GREEDY BY TEACHER LOAD (NEW FLOW)
+// 1. Sort teachers by load (highest → lowest)
+// 2. For each teacher: place subjects Mon-Fri, period 1→last
+// 3. Run repairMS() after each teacher
+// 4. Check & fix constraints before next teacher
+// ═══════════════════════════════════════════════════════
+function greedyMultiSchedule(variant = 0) {
+  const classes = getAllClasses();
+  const { numDays, periodsPerDay } = state.school;
+
+  // Initialize empty schedules
+  const sched = {};
+  classes.forEach(({ section: s }) => {
+    sched[s.id] = Array.from({ length: numDays }, () =>
+      new Array(periodsPerDay).fill(null),
+    );
+  });
+
+  // Place frozen cells first
+  classes.forEach(({ grade: g, section: s }) => {
+    const fz = state.frozen[s.id] || {};
+    if (state.results?.sched?.[s.id]) {
+      for (const key of Object.keys(fz)) {
+        const [d, p] = key.split("_").map(Number);
+        const dp = getPeriodsForDay(d, g);
+        if (d >= 0 && d < numDays && p >= 0 && p < dp) {
+          const si = state.results.sched[s.id][d][p];
+          if (si !== null && si !== undefined) sched[s.id][d][p] = si;
+        }
+      }
+    }
+  });
+
+  // Build teacher → subjects mapping with total load
+  const teacherSubjects = {};
+  let totalTeacherLoad = 0;
+
+  classes.forEach(({ section: s }) => {
+    s.subjects.forEach((sub, si) => {
+      const tids = getTeacherIds(sub);
+      for (const tid of tids) {
+        if (!teacherSubjects[tid]) teacherSubjects[tid] = [];
+        teacherSubjects[tid].push({ classId: s.id, subjectIdx: si, periodsPerWeek: sub.periodsPerWeek || 0 });
+        totalTeacherLoad += sub.periodsPerWeek || 0;
+      }
+    });
+  });
+
+  // Sort teachers by total load (highest first)
+  const sortedTeachers = Object.entries(teacherSubjects)
+    .map(([tid, subjects]) => {
+      const load = subjects.reduce((sum, s) => sum + s.periodsPerWeek, 0);
+      return { tid, subjects, load };
+    })
+    .sort((a, b) => b.load - a.load);
+
+  // For each teacher (from highest load to lowest)
+  for (const { tid, subjects } of sortedTeachers) {
+    // Place this teacher's subjects: Mon→Fri, period 1→last
+    for (const { classId, subjectIdx } of subjects) {
+      const section = classes.find(c => c.section.id === classId)?.section;
+      const grade = classes.find(c => c.section.id === classId)?.grade;
+      if (!section || !grade) continue;
+
+      const sub = section.subjects[subjectIdx];
+      let toPlace = sub.periodsPerWeek || 0;
+
+      // Count already placed
+      let already = 0;
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, grade);
+        for (let p = 0; p < dp; p++) {
+          if (sched[classId][d][p] === subjectIdx) already++;
+        }
+      }
+      toPlace -= already;
+
+      // Try to place remaining slots: Mon-Fri, period 1→last
+      const fz = state.frozen[classId] || {};
+      for (let d = 0; d < numDays && toPlace > 0; d++) {
+        const dp = getPeriodsForDay(d, grade);
+        for (let p = 0; p < dp && toPlace > 0; p++) {
+          const k = `${d}_${p}`;
+          if (!fz[k] && sched[classId][d][p] === null) {
+            sched[classId][d][p] = subjectIdx;
+            toPlace--;
+          }
+        }
+      }
+    }
+
+    // After placing all subjects for this teacher: repair + check constraints
+    repairMS(sched);
+  }
+
+  // Final alignment for same-grade constraint
+  alignSameGradeDays(sched);
+  return sched;
+}
 
 function cloneMS(ms) {
   const c = {};

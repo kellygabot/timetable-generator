@@ -32,9 +32,9 @@ const state = {
     afternoonPE: false,
     minTeacherIdle: false,
     noRoomConflict: true,
-    sameDayGrade: true, // ← NEW: same grade = same subject on same days
+    sameDayGrade: true,
     sameDayGradeSoft: false,
-    onePeriodPerDay: true, // ← NEW: one period max per day
+    onePeriodPerDay: true,
     mapehNotFirstOrFriday: true,
   },
   results: null,
@@ -46,7 +46,7 @@ let selectedClassId = null;
 let resultViewClass = null;
 let dayViewMode = "week";
 let resultViewDay = 0;
-let editingSubjectIdx = null; // null = adding new, number = editing index
+let editingSubjectIdx = null;
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 const DAYS_S = ["MON", "TUE", "WED", "THU", "FRI"];
 const GRADE_COLORS = {
@@ -119,7 +119,6 @@ document.getElementById("startTime").addEventListener("change", () => {
 document.getElementById("endTime") &&
   document.getElementById("endTime").addEventListener("change", function () {
     state.school.endTime = this.value;
-    // Apply to all days that haven't been customized
     for (let i = 0; i < state.school.numDays; i++) {
       if (
         !state.school.dayEndTimes[i] ||
@@ -188,11 +187,9 @@ function updateDayPeriods(dayIdx, val) {
 }
 
 function getPeriodsForDay(d, grade) {
-  // 1. Check explicit per-day period override
   const dp = state.school.dayPeriods;
   if (dp && dp[d] != null && dp[d] > 0) return dp[d];
 
-  // 2. Fall back to computing from end time
   const dayEndTimes = state.school.dayEndTimes || [];
   const endTime = dayEndTimes[d] || state.school.endTime || "15:15";
   const startMin = t2m(state.school.startTime || "08:00");
@@ -258,7 +255,6 @@ function addRoom() {
 
 function removeRoom(id) {
   state.rooms = state.rooms.filter((r) => r.id !== id);
-  // Clear assignments
   state.gradeLevels.forEach((g) =>
     g.sections.forEach((s) => {
       if (s.roomId === id) s.roomId = null;
@@ -354,7 +350,6 @@ function updateSchoolPreview() {
   const endEl = document.getElementById("endTime");
   if (endEl) state.school.endTime = endEl.value || "15:15";
 
-  // Keep per-day arrays at the right length
   const nd = state.school.numDays;
   if (!state.school.dayEndTimes) state.school.dayEndTimes = [];
   if (!state.school.dayPeriods) state.school.dayPeriods = [];
@@ -406,7 +401,6 @@ function toggleTeacherDropdown() {
   const isDirectlyHidden = list.style.display === "none";
   list.style.display = isDirectlyHidden ? "block" : "none";
 
-  // Close when clicking outside
   if (isDirectlyHidden) {
     const closer = (e) => {
       if (!e.target.closest(".multi-select-dropdown")) {
@@ -619,7 +613,6 @@ function removeGrade(id) {
   renderGradeLevelManager();
 }
 
-// ADD SECTION MODAL
 function addSectionModal() {
   const sel = document.getElementById("sm-grade");
   sel.innerHTML = state.gradeLevels
@@ -1093,7 +1086,6 @@ function cancelSubjectEdit() {
   renderClassEditor();
 }
 
-// Returns the teacher IDs array for a subject — handles both old {teacherId} and new {teacherIds}
 function getTeacherIds(sub) {
   if (!sub) return [];
   if (Array.isArray(sub.teacherIds)) return sub.teacherIds.filter(Boolean);
@@ -1125,7 +1117,7 @@ function addSubjectToClass() {
   const dur = parseInt(document.getElementById("e-dur").value) || 50;
   const roomEl = document.getElementById("e-room");
   const roomId = roomEl ? roomEl.value : "";
-  const isSynced = document.getElementById("e-synced").checked || false;
+  const isSynced = document.getElementById("e-synced")?.checked || false;
 
   const teacherChecks = document.querySelectorAll(
     'input[name="subj-teacher-check"]:checked',
@@ -1241,7 +1233,6 @@ const HARD_CONSTRAINTS = [
     name: "No Room Conflicts",
     desc: "Two different classes cannot occupy the same room in the same period",
   },
-  // ← NEW constraint
   {
     id: "sameDayGrade",
     name: "Same-Grade Same-Day Subjects",
@@ -1314,7 +1305,6 @@ function renderConstraints() {
 }
 
 function constraintRow(c, hard) {
-  // Only the two core hard constraints are permanently locked
   const locked =
     hard && (c.id === "noTeacherConflict" || c.id === "allPeriodsPlaced");
   return `<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--border)">
@@ -1338,7 +1328,7 @@ function selAlgo(a) {
   });
 }
 
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════F
 // SCHEDULE GENERATION
 // ═══════════════════════════════════════════════════════
 function getAllClasses() {
@@ -1524,6 +1514,194 @@ function randomMultiSchedule() {
       }
     }
   });
+  return sched;
+}
+
+// Deterministic tiny tie-breaker (no Math.random)
+function greedyTieBreak(variant, classId, si, d, p) {
+  const s = `${variant}|${classId}|${si}|${d}|${p}`;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 1000) / 1e6; // 0..0.000999
+}
+
+// ═══════════════════════════════════════════════════════
+// GREEDY BY TEACHER LOAD (NEW FLOW)
+// 1. Sort teachers by load (highest → lowest)
+// 2. For each teacher: place subjects Mon-Fri, period 1→last
+// 3. Run repairMS() after each teacher
+// 4. Check & fix constraints before next teacher
+// ═══════════════════════════════════════════════════════
+function greedyMultiSchedule(variant = 0) {
+  const classes = getAllClasses();
+  const { numDays, periodsPerDay } = state.school;
+
+  const sched = {};
+  const teacherOcc = new Set();
+  const roomOcc = new Set();
+  const placedByClass = {};
+  const dayUseByClass = {};
+  const gradeRefDays = {};
+
+  function occupy(grade, section, si, d, p) {
+    const sub = section.subjects[si];
+    if (!sub) return;
+    const tids = getTeacherIds(sub);
+    for (const tid of tids) teacherOcc.add(`${tid}_${d}_${p}`);
+    if (state.constraints.noRoomConflict) {
+      const rid = sub.roomId || section.roomId;
+      if (rid) roomOcc.add(`${rid}_${d}_${p}`);
+    }
+  }
+
+  function dayLoad(classId, grade, d) {
+    const dp = getPeriodsForDay(d, grade);
+    let used = 0;
+    for (let p = 0; p < dp; p++) if (sched[classId][d][p] !== null) used++;
+    return used;
+  }
+
+  classes.forEach(({ grade: g, section: s }) => {
+    sched[s.id] = Array.from({ length: numDays }, () =>
+      new Array(periodsPerDay).fill(null),
+    );
+    placedByClass[s.id] = new Array(s.subjects.length).fill(0);
+    dayUseByClass[s.id] = s.subjects.map(() => new Array(numDays).fill(0));
+
+    const fz = state.frozen[s.id] || {};
+    if (state.results?.sched?.[s.id]) {
+      for (const key of Object.keys(fz)) {
+        const [d, p] = key.split("_").map(Number);
+        const dp = getPeriodsForDay(d, g);
+        if (d < 0 || d >= numDays || p < 0 || p >= dp) continue;
+        const si = state.results.sched[s.id][d][p];
+        if (si === null || si === undefined) continue;
+        sched[s.id][d][p] = si;
+        placedByClass[s.id][si]++;
+        dayUseByClass[s.id][si][d]++;
+        occupy(g, s, si, d, p);
+      }
+    }
+  });
+
+  classes.forEach(({ grade: g, section: s }) => {
+    const classId = s.id;
+    const fz = state.frozen[classId] || {};
+    const placed = placedByClass[classId];
+    const dayUse = dayUseByClass[classId];
+
+    if (!gradeRefDays[g.id]) gradeRefDays[g.id] = {};
+    const refByCode = gradeRefDays[g.id];
+
+    const remaining = s.subjects.map((sub, si) =>
+      Math.max(0, (sub.periodsPerWeek || 0) - (placed[si] || 0)),
+    );
+    const totalRem = remaining.reduce((a, b) => a + b, 0);
+
+    for (let step = 0; step < totalRem; step++) {
+      let pickSi = -1;
+      let pickScore = -Infinity;
+
+      for (let si = 0; si < s.subjects.length; si++) {
+        if (remaining[si] <= 0) continue;
+        const sub = s.subjects[si];
+        const avg = (sub.periodsPerWeek || 0) / Math.max(1, numDays);
+        const spreadPenalty = dayUse[si].reduce((acc, c) => acc + Math.abs(c - avg), 0);
+        const score = remaining[si] * 100 - spreadPenalty * 3 - si * 0.001;
+        if (score > pickScore) {
+          pickScore = score;
+          pickSi = si;
+        }
+      }
+
+      if (pickSi < 0) break;
+      const sub = s.subjects[pickSi];
+      const targetDays = refByCode[sub.code];
+
+      let best = null;
+      let bestScore = -Infinity;
+
+      for (let d = 0; d < numDays; d++) {
+        const dp = getPeriodsForDay(d, g);
+        for (let p = 0; p < dp; p++) {
+          const k = `${d}_${p}`;
+          if (fz[k]) continue;
+          if (sched[classId][d][p] !== null) continue;
+
+          let score = 1000;
+
+          const tids = getTeacherIds(sub);
+          let tConf = 0;
+          for (const tid of tids) if (teacherOcc.has(`${tid}_${d}_${p}`)) tConf++;
+          if (tConf > 0) score -= 10000 * tConf;
+
+          if (state.constraints.noRoomConflict) {
+            const rid = sub.roomId || s.roomId;
+            if (rid && roomOcc.has(`${rid}_${d}_${p}`)) score -= 6000;
+          }
+
+          const usedTodayForSubject = dayUse[pickSi][d];
+          score -= usedTodayForSubject * 180;
+          if (state.constraints.onePeriodPerDay && usedTodayForSubject > 0) score -= 1500;
+
+          score -= dayLoad(classId, g, d) * 6;
+
+          if ((state.constraints.sameDayGrade || state.constraints.sameDayGradeSoft) && targetDays && targetDays.size) {
+            score += targetDays.has(d) ? 260 : -260;
+          }
+
+          score -= d * 0.5 + p * 0.1;
+          score += greedyTieBreak(variant, classId, pickSi, d, p);
+
+          if (score > bestScore) {
+            bestScore = score;
+            best = [d, p];
+          }
+        }
+      }
+
+      if (!best) {
+        outer: for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          for (let p = 0; p < dp; p++) {
+            const k = `${d}_${p}`;
+            if (!fz[k] && sched[classId][d][p] === null) {
+              best = [d, p];
+              break outer;
+            }
+          }
+        }
+      }
+
+      if (!best) break;
+      const [bd, bp] = best;
+      sched[classId][bd][bp] = pickSi;
+      remaining[pickSi]--;
+      placed[pickSi]++;
+      dayUse[pickSi][bd]++;
+      occupy(g, s, pickSi, bd, bp);
+    }
+
+    if (g.sections[0] && g.sections[0].id === s.id) {
+      s.subjects.forEach((sub, si) => {
+        if (!refByCode[sub.code]) refByCode[sub.code] = new Set();
+        for (let d = 0; d < numDays; d++) {
+          const dp = getPeriodsForDay(d, g);
+          for (let p = 0; p < dp; p++) {
+            if (sched[classId][d][p] === si) {
+              refByCode[sub.code].add(d);
+              break;
+            }
+          }
+        }
+      });
+    }
+  });
+
+  alignSameGradeDays(sched);
   return sched;
 }
 
@@ -1757,7 +1935,11 @@ function countSyncedSubjectViolations(ms) {
       s.subjects.forEach((sub, si) => {
         if (sub.isSynced) {
           if (!syncedSubjects[sub.code]) syncedSubjects[sub.code] = [];
-          syncedSubjects[sub.code].push({ grade: g, section: s, subjectIdx: si });
+          syncedSubjects[sub.code].push({
+            grade: g,
+            section: s,
+            subjectIdx: si,
+          });
         }
       });
     });
@@ -1798,7 +1980,10 @@ function countSyncedSubjectViolations(ms) {
         violations += Math.abs(refSlots.length - currSlots.length);
       } else {
         for (let i = 0; i < refSlots.length; i++) {
-          if (refSlots[i].day !== currSlots[i].day || refSlots[i].period !== currSlots[i].period) {
+          if (
+            refSlots[i].day !== currSlots[i].day ||
+            refSlots[i].period !== currSlots[i].period
+          ) {
             violations++;
           }
         }
@@ -2167,8 +2352,8 @@ function runGA() {
     "i",
     `[GA] Pop:${popSize} Gen:${gens} Mut:${(mutRate * 100).toFixed(0)}% Elite:${(eliteRate * 100).toFixed(0)}%`,
   );
-  let pop = Array.from({ length: popSize }, () =>
-    repairMS(randomMultiSchedule()),
+  let pop = Array.from({ length: popSize }, (_, i) =>
+    repairMS(greedyMultiSchedule(i)),
   );
   let scores = pop.map((s) => fitnessMS(s));
   let best = pop[scores.indexOf(Math.max(...scores))];
@@ -2223,7 +2408,7 @@ async function runSA() {
   const chainA = {
     id: "A",
     temp,
-    cur: repairMS(randomMultiSchedule()),
+    cur: repairMS(greedyMultiSchedule(0)),
     curF: 0,
     best: null,
     bestF: -Infinity,
@@ -2237,7 +2422,7 @@ async function runSA() {
   const chainB = {
     id: "B",
     temp: Math.max(1, Math.round(temp * 1.8)),
-    cur: repairMS(randomMultiSchedule()),
+    cur: repairMS(greedyMultiSchedule(1)),
     curF: 0,
     best: null,
     bestF: -Infinity,
